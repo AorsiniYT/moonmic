@@ -17,8 +17,8 @@
 
 namespace moonmic {
 
-static const char* VERSION_URL = "https://raw.githubusercontent.com/AorsiniYT/libmoonmic/main/VERSION";
-static const char* RELEASES_URL = "https://github.com/AorsiniYT/libmoonmic/releases";
+static const char* VERSION_URL = "https://raw.githubusercontent.com/AorsiniYT/moonmic/main/VERSION";
+static const char* RELEASES_URL = "https://github.com/AorsiniYT/moonmic/releases";
 
 VersionChecker::VersionChecker() {
 }

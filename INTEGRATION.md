@@ -1,6 +1,6 @@
-# libmoonmic - Integration Guide
+# moonmic - Integration Guide
 
-This guide explains how to integrate libmoonmic into vita-moonlight and other Moonlight clients.
+This guide explains how to integrate moonmic into vita-moonlight and other Moonlight clients.
 
 ## Building
 

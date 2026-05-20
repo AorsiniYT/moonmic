@@ -1,29 +1,29 @@
-# libmoonmic Build Instructions
+# moonmic Build Instructions
 
 ## Unified Build System
 
-The libmoonmic package uses a unified build system that compiles both the client library and host applications.
+The moonmic package uses a unified build system that compiles both the client library and host applications.
 
 ## Quick Start
 
 ### Build Everything (Current Platform)
 
 ```bash
-cd third_party/libmoonmic
+cd third_party/moonmic
 mkdir build && cd build
 cmake ..
 make
 ```
 
 This will create:
-- `libmoonmic.a` - Client library
+- `moonmic.a` - Client library
 - `host-<platform>/moonmic-host` - Host application for your platform
 
 ### Build Structure
 
 ```
 build/
-├── libmoonmic.a              # Client library
+├── moonmic.a              # Client library
 ├── host-windows/             # Windows host (if built)
 │   ├── moonmic-host.exe
 │   ├── moonmic-host.json
@@ -91,7 +91,7 @@ cmake -DCMAKE_TOOLCHAIN_FILE=$VITASDK/share/vita.toolchain.cmake \
 make
 ```
 
-Output: `build/libmoonmic.a`
+Output: `build/moonmic.a`
 
 ## Dependencies
 
@@ -231,4 +231,4 @@ cmake ..
 make
 ```
 
-libmoonmic will be compiled and linked automatically.
+moonmic will be compiled and linked automatically.

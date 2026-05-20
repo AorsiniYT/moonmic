@@ -4,7 +4,7 @@ Cross-platform host application for receiving microphone audio from Moonlight cl
 
 ## Overview
 
-**moonmic-host** receives UDP audio packets from libmoonmic clients, decodes them, and injects the audio into a virtual audio device on the host system. This allows any application (Discord, Teams, OBS, etc.) to capture the remote microphone as if it were a local device.
+**moonmic-host** receives UDP audio packets from moonmic clients, decodes them, and injects the audio into a virtual audio device on the host system. This allows any application (Discord, Teams, OBS, etc.) to capture the remote microphone as if it were a local device.
 
 ## Features
 

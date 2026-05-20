@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-// Simple logging function for libmoonmic
+// Simple logging function for moonmic
 static inline void moonmic_log(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);

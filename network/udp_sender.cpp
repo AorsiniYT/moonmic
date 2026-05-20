@@ -1,6 +1,6 @@
 /**
  * @file udp_sender.cpp
- * @brief UDP sender implementation for libmoonmic
+ * @brief UDP sender implementation for moonmic
  */
 
 #include "moonmic_internal.h"

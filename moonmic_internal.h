@@ -1,6 +1,6 @@
 /**
  * @file moonmic_internal.h
- * @brief Internal types and definitions for libmoonmic
+ * @brief Internal types and definitions for moonmic
  */
 
 #pragma once

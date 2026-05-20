@@ -23,7 +23,7 @@
 
 namespace moonmic {
 
-// Handshake packet structure (matches libmoonmic client)
+// Handshake packet structure (matches moonmic client)
 #pragma pack(push, 1)
 struct MoonMicHandshake {
     uint32_t magic;           // 0x4D4F4F4E ("MOON")

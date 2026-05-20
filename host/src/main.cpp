@@ -1045,11 +1045,11 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
         
         ImGui::Text("GitHub:");
         ImGui::SameLine();
-        if (ImGui::SmallButton("libmoonmic")) {
+        if (ImGui::SmallButton("moonmic")) {
             #ifdef _WIN32
-            ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT/libmoonmic", NULL, NULL, SW_SHOWNORMAL);
+            ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT/moonmic", NULL, NULL, SW_SHOWNORMAL);
             #else
-            system("xdg-open https://github.com/AorsiniYT/libmoonmic &");
+            system("xdg-open https://github.com/AorsiniYT/moonmic &");
             #endif
         }
         
