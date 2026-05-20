@@ -1,10 +1,10 @@
-# libmoonmic
+# Moonmic
 
 Cross-platform microphone capture library for Moonlight clients with UDP transmission to host.
 
 ## Overview
 
-**libmoonmic** is a modular C library that enables microphone audio capture and transmission from Moonlight clients to a host application. It provides:
+**Moonmic** is a modular C library that enables microphone audio capture and transmission from Moonlight clients to a host application. It provides:
 
 - **Client Library**: Captures microphone audio and transmits via UDP with Opus encoding
 - **Host Application**: Receives audio and injects into virtual audio device
@@ -14,7 +14,7 @@ Cross-platform microphone capture library for Moonlight clients with UDP transmi
 
 ```
 ┌─────────────────┐         UDP          ┌──────────────────┐
-│  libmoonmic     │ ───────────────────> │  moonmic-host    │
+│  moonmic        │ ───────────────────> │  moonmic-host    │
 │  (Client)       │   Opus Encoded       │  (Host)          │
 │                 │   Port 48100         │                  │
 │ - PS Vita       │                      │ - Windows        │
@@ -33,7 +33,7 @@ Cross-platform microphone capture library for Moonlight clients with UDP transmi
 ## Project Structure
 
 ```
-libmoonmic/
+moonmic/
 ├── moonmic.h                    # Public C API
 ├── moonmic_internal.h           # Internal types
 ├── moonmic_client.cpp           # Main client implementation
@@ -82,7 +82,7 @@ libmoonmic/
 
 ## Features
 
-### Client Library (libmoonmic)
+### Client Library (moonmic)
 
 - ✅ Simple C API
 - ✅ Modular platform architecture
@@ -252,7 +252,7 @@ See [INTEGRATION.md](INTEGRATION.md) for detailed build instructions.
 # Client library
 mkdir build && cd build
 cmake ..
-make libmoonmic
+make moonmic
 
 # Host application
 cd host
