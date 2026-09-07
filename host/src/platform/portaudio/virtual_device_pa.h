@@ -9,7 +9,7 @@
 namespace moonmic {
 
 class VirtualDevicePortAudio : public VirtualDevice {
-public:
+  public:
     VirtualDevicePortAudio();
     ~VirtualDevicePortAudio() override;
 
@@ -18,31 +18,25 @@ public:
     void close() override;
     int getSampleRate() const override { return actual_sample_rate_; }
     float getBufferUsage() const override;
-    
-    // PortAudio callback
-    static int paCallback(const void* inputBuffer, void* outputBuffer,
-                          unsigned long framesPerBuffer,
-                          const PaStreamCallbackTimeInfo* timeInfo,
-                          PaStreamCallbackFlags statusFlags,
-                          void* userData);
 
-private:
+    static int paCallback(const void* inputBuffer, void* outputBuffer, unsigned long framesPerBuffer,
+                          const PaStreamCallbackTimeInfo* timeInfo, PaStreamCallbackFlags statusFlags, void* userData);
+
+  private:
     PaStream* stream_ = nullptr;
     int actual_sample_rate_ = 48000;
-    int channels_ = 2; // Output channels
-    bool is_float_ = false; // Output is Float32
-    
-    // Ring Buffer for Callback Mode
+    int channels_ = 2;
+    bool is_float_ = false;
+
     std::vector<float> ring_buffer_;
     size_t rb_read_pos_ = 0;
     size_t rb_write_pos_ = 0;
     size_t rb_size_ = 0;
-    
-    std::mutex mutex_;
-    
-    // Resampling
+
+    mutable std::mutex mutex_;
+
     SpeexResamplerState* resampler_ = nullptr;
-    int source_sample_rate_ = 0; // Input rate (from network)
+    int source_sample_rate_ = 0;
 };
 
 } // namespace moonmic

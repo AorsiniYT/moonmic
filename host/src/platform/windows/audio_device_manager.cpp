@@ -1,7 +1,3 @@
-/**
- * @file audio_device_manager.cpp
- * @brief Audio device management implementation
- */
 
 #include <initguid.h>
 #include "audio_device_manager.h"
@@ -12,8 +8,6 @@
 #include <ks.h>
 #include <ksmedia.h>
 
-// Manually define KSDATAFORMAT_SUBTYPE_IEEE_FLOAT for MinGW compatibility if needed
-// 00000003-0000-0010-8000-00AA00389B71
 DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, 0x00000003, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
 
 namespace moonmic {
@@ -33,7 +27,6 @@ bool AudioDeviceManager::initializeCOM() {
         return false;
     }
 
-    // Create device enumerator
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
                           __uuidof(IMMDeviceEnumerator), (void**)&enumerator_);
     if (FAILED(hr)) {
@@ -41,12 +34,11 @@ bool AudioDeviceManager::initializeCOM() {
         return false;
     }
 
-    // Create policy config (for changing default device)
     hr = CoCreateInstance(CLSID_CPolicyConfigClient, NULL, CLSCTX_ALL,
                           IID_IPolicyConfig, (void**)&policy_config_);
     if (FAILED(hr)) {
         std::cerr << "[AudioDeviceManager] Failed to create IPolicyConfig (Windows 10+ required)" << std::endl;
-        // Non-fatal, device enumeration still works
+
     }
 
     return true;
@@ -72,7 +64,6 @@ std::vector<AudioDeviceInfo> AudioDeviceManager::enumerateRecordingDevices() {
         return devices;
     }
 
-    // Get default device ID for comparison
     IMMDevice* defaultDevice = nullptr;
     std::wstring defaultId;
     HRESULT hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &defaultDevice);
@@ -86,7 +77,6 @@ std::vector<AudioDeviceInfo> AudioDeviceManager::enumerateRecordingDevices() {
         defaultDevice->Release();
     }
 
-    // Enumerate all capture devices
     IMMDeviceCollection* collection = nullptr;
     hr = enumerator_->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection);
     if (FAILED(hr)) {
@@ -104,19 +94,17 @@ std::vector<AudioDeviceInfo> AudioDeviceManager::enumerateRecordingDevices() {
 
         AudioDeviceInfo info;
 
-        // Get device ID
         LPWSTR pwszID = NULL;
         device->GetId(&pwszID);
         if (pwszID) {
             int size_needed = WideCharToMultiByte(CP_UTF8, 0, pwszID, -1, NULL, 0, NULL, NULL);
             std::string id(size_needed, 0);
             WideCharToMultiByte(CP_UTF8, 0, pwszID, -1, &id[0], size_needed, NULL, NULL);
-            info.id = id.c_str(); // Remove null terminator
+            info.id = id.c_str();
             info.is_default = (defaultId == pwszID);
             CoTaskMemFree(pwszID);
         }
 
-        // Get friendly name
         IPropertyStore* props = nullptr;
         device->OpenPropertyStore(STGM_READ, &props);
         if (props) {
@@ -151,7 +139,6 @@ AudioDeviceInfo AudioDeviceManager::getCurrentDefaultRecordingDevice() {
     HRESULT hr = enumerator_->GetDefaultAudioEndpoint(eCapture, eConsole, &device);
     if (FAILED(hr)) return info;
 
-    // Get device ID
     LPWSTR pwszID = NULL;
     device->GetId(&pwszID);
     if (pwszID) {
@@ -162,7 +149,6 @@ AudioDeviceInfo AudioDeviceManager::getCurrentDefaultRecordingDevice() {
         CoTaskMemFree(pwszID);
     }
 
-    // Get friendly name
     IPropertyStore* props = nullptr;
     device->OpenPropertyStore(STGM_READ, &props);
     if (props) {
@@ -191,12 +177,10 @@ bool AudioDeviceManager::setDefaultRecordingDevice(const std::string& device_id)
         return false;
     }
 
-    // Convert UTF-8 to wide string
     int size_needed = MultiByteToWideChar(CP_UTF8, 0, device_id.c_str(), -1, NULL, 0);
     std::wstring wid(size_needed, 0);
     MultiByteToWideChar(CP_UTF8, 0, device_id.c_str(), -1, &wid[0], size_needed);
 
-    // Set as default for all roles (Console, Multimedia, Communications)
     HRESULT hr = policy_config_->SetDefaultEndpoint(wid.c_str(), eConsole);
     if (FAILED(hr)) {
         std::cerr << "[AudioDeviceManager] SetDefaultEndpoint failed: " << hr << std::endl;
@@ -211,11 +195,11 @@ bool AudioDeviceManager::setDefaultRecordingDevice(const std::string& device_id)
 }
 
 bool AudioDeviceManager::isVirtualMicrophone(const std::string& device_name) {
-    // Check for known virtual microphone patterns
-    return (device_name.find("Steam") != std::string::npos && 
+
+    return (device_name.find("Steam") != std::string::npos &&
             device_name.find("Microphone") != std::string::npos) ||
            (device_name.find("CABLE Output") != std::string::npos) ||
-           (device_name.find("VB-Audio") != std::string::npos && 
+           (device_name.find("VB-Audio") != std::string::npos &&
             device_name.find("Output") != std::string::npos);
 }
 
@@ -248,20 +232,18 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
         device->OpenPropertyStore(STGM_READ, &props);
         if (props) {
             bool matched = false;
-            
-            // Check ID first
+
             LPWSTR pwszID = NULL;
             device->GetId(&pwszID);
             if (pwszID) {
                 int size_needed = WideCharToMultiByte(CP_UTF8, 0, pwszID, -1, NULL, 0, NULL, NULL);
                 std::string id(size_needed, 0);
                 WideCharToMultiByte(CP_UTF8, 0, pwszID, -1, &id[0], size_needed, NULL, NULL);
-                id = id.c_str(); 
+                id = id.c_str();
                 if (id == device_name) matched = true;
                 CoTaskMemFree(pwszID);
             }
 
-            // Check Friendly Name if ID did not match
             if (!matched) {
                 PROPVARIANT varName;
                 PropVariantInit(&varName);
@@ -271,7 +253,7 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
                     int size_needed = MultiByteToWideChar(CP_UTF8, 0, device_name.c_str(), -1, NULL, 0);
                     std::wstring wsearch(size_needed, 0);
                     MultiByteToWideChar(CP_UTF8, 0, device_name.c_str(), -1, &wsearch[0], size_needed);
-                    
+
                     if (wname.find(wsearch.c_str()) != std::wstring::npos || device_name.empty()) {
                         matched = true;
                     }
@@ -298,12 +280,12 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
                         } else if (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
                             out_format.is_float = true;
                         }
-                        
+
                         found = true;
-                        std::cout << "[AudioDeviceManager] Native format for '" << device_name << "': " 
-                                  << out_format.sample_rate << "Hz, " 
-                                  << out_format.channels << "ch, " 
-                                  << out_format.bits_per_sample << "-bit " 
+                        std::cout << "[AudioDeviceManager] Native format for '" << device_name << "': "
+                                  << out_format.sample_rate << "Hz, "
+                                  << out_format.channels << "ch, "
+                                  << out_format.bits_per_sample << "-bit "
                                   << (out_format.is_float ? "(float)" : "(int)") << std::endl;
                     }
                 }
@@ -320,4 +302,4 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
     return found;
 }
 
-} // namespace moonmic
+}

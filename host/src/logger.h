@@ -17,7 +17,7 @@
 namespace moonmic {
 
 class Logger {
-public:
+  public:
     static Logger& instance() {
         static Logger instance;
         return instance;
@@ -40,32 +40,24 @@ public:
         }
 #endif
         if (dir.empty()) dir = ".";
-        
+
         std::filesystem::path p(dir);
         return (p / "moonmic.log").string();
     }
 
     void init() {
         std::string logPath = getLogPath();
-        
+
         logFile_.open(logPath, std::ios::out | std::ios::trunc);
         if (logFile_.is_open()) {
-            // Redirect std::cout and std::cerr to our file AND keep console output
-            // For simplicity in this codebase, we will just write to file in addition to console
-            // by hooking into a custom streambuf or just manually writing.
-            // But since the codebase uses std::cout everywhere, we need to redirect.
-            
-            // Save original buffers
             original_cout_ = std::cout.rdbuf();
             original_cerr_ = std::cerr.rdbuf();
-            
-            // Create tee buffers
             cout_tee_ = std::make_unique<TeeStreamBuf>(original_cout_, logFile_);
             cerr_tee_ = std::make_unique<TeeStreamBuf>(original_cerr_, logFile_);
-            
+
             std::cout.rdbuf(cout_tee_.get());
             std::cerr.rdbuf(cerr_tee_.get());
-            
+
             std::cout << "[Logger] Log file opened: " << logPath << std::endl;
         } else {
             std::cerr << "[Logger] Failed to open log file: " << logPath << std::endl;
@@ -80,37 +72,36 @@ public:
         }
     }
 
-private:
+  private:
     Logger() = default;
-    
+
     std::ofstream logFile_;
     std::streambuf* original_cout_ = nullptr;
     std::streambuf* original_cerr_ = nullptr;
-    
-    // Helper class to write to two streams
+
     class TeeStreamBuf : public std::streambuf {
-    public:
+      public:
         TeeStreamBuf(std::streambuf* sb1, std::ostream& os2) : sb1_(sb1), os2_(os2) {}
-        
-    protected:
+
+      protected:
         virtual int overflow(int c) override {
             if (c == EOF) return !EOF;
             int const r1 = sb1_->sputc(c);
             os2_.put(c);
             return r1;
         }
-        
+
         virtual int sync() override {
             int const r1 = sb1_->pubsync();
             os2_.flush();
             return r1;
         }
-        
-    private:
+
+      private:
         std::streambuf* sb1_;
         std::ostream& os2_;
     };
-    
+
     std::unique_ptr<TeeStreamBuf> cout_tee_;
     std::unique_ptr<TeeStreamBuf> cerr_tee_;
 };

@@ -1,7 +1,3 @@
-/**
- * @file guardian_state.cpp
- * @brief Guardian state file management implementation
- */
 
 #include "guardian_state.h"
 #include <nlohmann/json.hpp>
@@ -20,14 +16,14 @@ std::string GuardianStateManager::getStatePath() {
 #ifdef _WIN32
     char appdata[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, appdata))) {
-        std::string path = std::string(appdata) + "\\AorsiniYT\\MoonMic";
+        std::string path = std::string(appdata) + "\\AorsiniYT\\Moonmic";
         std::filesystem::create_directories(path);
         return path + "\\moonmic.state";
     }
 #else
     const char* home = std::getenv("HOME");
     if (home) {
-        std::string path = std::string(home) + "/.config/AorsiniYT/MoonMic";
+        std::string path = std::string(home) + "/.config/AorsiniYT/Moonmic";
         std::filesystem::create_directories(path);
         return path + "/moonmic.state";
     }
@@ -42,16 +38,16 @@ bool GuardianStateManager::writeState(const GuardianState& state) {
         j["original_mic_name"] = state.original_mic_name;
         j["host_pid"] = state.host_pid;
         j["timestamp"] = state.timestamp;
-        
+
         std::ofstream file(getStatePath());
         if (!file.is_open()) {
             std::cerr << "[GuardianState] Failed to open state file for writing" << std::endl;
             return false;
         }
-        
+
         file << j.dump(2);
         file.close();
-        
+
         std::cout << "[GuardianState] State saved: " << state.original_mic_name << std::endl;
         return true;
     } catch (const std::exception& e) {
@@ -66,16 +62,16 @@ bool GuardianStateManager::readState(GuardianState& state) {
         if (!file.is_open()) {
             return false;
         }
-        
+
         nlohmann::json j;
         file >> j;
         file.close();
-        
+
         state.original_mic_id = j.value("original_mic_id", "");
         state.original_mic_name = j.value("original_mic_name", "");
         state.host_pid = j.value("host_pid", 0UL);
         state.timestamp = j.value("timestamp", 0L);
-        
+
         return !state.original_mic_id.empty();
     } catch (const std::exception& e) {
         std::cerr << "[GuardianState] Read error: " << e.what() << std::endl;

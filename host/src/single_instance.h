@@ -1,7 +1,3 @@
-/**
- * @file single_instance.h
- * @brief Ensure only one instance of the application runs
- */
 
 #pragma once
 
@@ -14,22 +10,15 @@
 namespace moonmic {
 
 class SingleInstance {
-public:
+  public:
     SingleInstance(const std::string& app_name);
     ~SingleInstance();
-    
-    /**
-     * @brief Check if another instance is already running
-     * @return true if another instance exists
-     */
+
     bool isAnotherInstanceRunning();
-    
-    /**
-     * @brief Bring existing instance window to front
-     */
+
     void bringExistingToFront();
-    
-private:
+
+  private:
 #ifdef _WIN32
     HANDLE mutex_;
     std::string window_title_;

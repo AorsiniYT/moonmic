@@ -1,7 +1,3 @@
-/**
- * @file display_settings_gui.h
- * @brief ImGui modal for display settings
- */
 
 #pragma once
 
@@ -11,35 +7,19 @@
 
 namespace moonmic {
 
-/**
- * @brief GUI for configuring display settings
- */
 class DisplaySettingsGUI {
-public:
+  public:
     DisplaySettingsGUI();
-    
-    /**
-     * @brief Render the display settings modal window
-     * @param display_mgr Reference to DisplayManager
-     */
+
     void render(DisplayManager& display_mgr);
-    
-    /**
-     * @brief Open the settings window
-     */
+
     void open();
-    
-    /**
-     * @brief Close the settings window
-     */
+
     void close();
-    
-    /**
-     * @brief Check if window is open
-     */
+
     bool isOpen() const { return is_open_; }
-    
-private:
+
+  private:
     bool is_open_;
     int selected_width_;
     int selected_height_;
@@ -49,4 +29,4 @@ private:
 
 } // namespace moonmic
 
-#endif // USE_IMGUI
+#endif

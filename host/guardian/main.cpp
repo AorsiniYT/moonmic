@@ -1,7 +1,3 @@
-/**
- * @file main.cpp  
- * @brief moonmic-guardian - Standalone watchdog executable with ImGui interface
- */
 
 #include <iostream>
 #include <vector>
@@ -36,55 +32,44 @@
 
 using namespace moonmic;
 
-// --- Platform Abstractions ---
-
 namespace platform {
-    bool isProcessAlive(unsigned long pid) {
+bool isProcessAlive(unsigned long pid) {
 #ifdef _WIN32
-        HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-        if (!hProcess) return false;
-        DWORD exitCode;
-        if (GetExitCodeProcess(hProcess, &exitCode)) {
-            CloseHandle(hProcess);
-            return exitCode == STILL_ACTIVE;
-        }
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!hProcess) return false;
+    DWORD exitCode;
+    if (GetExitCodeProcess(hProcess, &exitCode)) {
         CloseHandle(hProcess);
-        return false;
-#else
-        return (kill(pid, 0) == 0);
-#endif
+        return exitCode == STILL_ACTIVE;
     }
-
-    bool restoreMicrophone(const std::string& micId) {
-#ifdef _WIN32
-        AudioDeviceManager devMgr;
-        return devMgr.setDefaultRecordingDevice(micId);
+    CloseHandle(hProcess);
+    return false;
 #else
-        // TODO: Linux PulseAudio/PipeWire restoration
-        std::cout << "[Guardian] Restoration not yet implemented on Linux" << std::endl;
-        return false;
+    return (kill(pid, 0) == 0);
 #endif
-    }
-
-    std::string getCurrentMicName() {
-#ifdef _WIN32
-        AudioDeviceManager devMgr;
-        return devMgr.getCurrentDefaultRecordingDevice().name;
-#else
-        return "Unknown (Linux)";
-#endif
-    }
 }
 
-// --- UI State ---
+bool restoreMicrophone(const std::string& micId) {
+#ifdef _WIN32
+    AudioDeviceManager devMgr;
+    return devMgr.setDefaultRecordingDevice(micId);
+#else
+    std::cout << "[Guardian] Restoration not yet implemented on Linux" << std::endl;
+    return false;
+#endif
+}
 
-enum class GuardianMode {
-    MONITORING,
-    TEST_MODE,
-    CRASH_DETECTED,
-    RESULT_SUCCESS,
-    RESULT_FAILED
-};
+std::string getCurrentMicName() {
+#ifdef _WIN32
+    AudioDeviceManager devMgr;
+    return devMgr.getCurrentDefaultRecordingDevice().name;
+#else
+    return "Unknown (Linux)";
+#endif
+}
+} // namespace platform
+
+enum class GuardianMode { MONITORING, TEST_MODE, CRASH_DETECTED, RESULT_SUCCESS, RESULT_FAILED };
 
 struct UIState {
     GuardianMode mode = GuardianMode::MONITORING;
@@ -105,15 +90,21 @@ void dumpLog(UIState& ui) {
         ui.mode = GuardianMode::RESULT_FAILED;
         return;
     }
-    
+
     auto now = std::time(nullptr);
+    std::tm localTime;
+#ifdef _WIN32
+    localtime_s(&localTime, &now);
+#else
+    localtime_r(&now, &localTime);
+#endif
     char buf[64];
-    std::strftime(buf, sizeof(buf), "moonmic_crash_%Y%m%d_%H%M%S.log", std::localtime(&now));
+    std::strftime(buf, sizeof(buf), "moonmic_crash_%Y%m%d_%H%M%S.log", &localTime);
     std::string dumpName = buf;
-    
+
     std::filesystem::path p(logPath);
     std::string dumpPath = (p.parent_path() / dumpName).string();
-    
+
     try {
         std::filesystem::copy_file(logPath, dumpPath, std::filesystem::copy_options::overwrite_existing);
         ui.message = "Log dumped to:\n" + dumpPath;
@@ -127,9 +118,9 @@ void dumpLog(UIState& ui) {
 void viewLog() {
     std::string logPath = getLogPath();
 #ifdef _WIN32
-    // Open a CMD window to display the log content
-    // /K keeps the window open so the user can read the output
-    std::string params = "/K echo [MoonMic Log Viewer] && echo File: " + logPath + " && echo ---------------------------------------- && type \"" + logPath + "\"";
+
+    std::string params = "/K echo [Moonmic Log Viewer] && echo File: " + logPath +
+                         " && echo ---------------------------------------- && type \"" + logPath + "\"";
     ShellExecuteA(NULL, "open", "cmd.exe", params.c_str(), NULL, SW_SHOW);
 #else
     std::string cmd = "xdg-open \"" + logPath + "\"";
@@ -142,93 +133,92 @@ void renderUI(UIState& ui) {
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
-    
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | 
-                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse | 
-                            ImGuiWindowFlags_NoSavedSettings;
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
 
     ImGui::Begin("Guardian", nullptr, flags);
 
     switch (ui.mode) {
-        case GuardianMode::TEST_MODE:
-            ImGui::TextColored(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), "MoonMic Guardian - Test Mode");
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextWrapped("This is the watchdog process. It normally runs in the background.");
-            ImGui::TextWrapped("Click 'Test Restore' to verify if your microphone can be restored to its original state.");
-            ImGui::Spacing();
-            if (ImGui::Button("Test Restore", ImVec2(120, 40))) {
-                if (GuardianStateManager::readState(ui.state)) {
-                    if (platform::restoreMicrophone(ui.state.original_mic_id)) {
-                        ui.mode = GuardianMode::RESULT_SUCCESS;
-                        ui.message = "Microphone restored to: " + ui.state.original_mic_name;
-                        GuardianStateManager::deleteState();
-                    } else {
-                        ui.mode = GuardianMode::RESULT_FAILED;
-                        ui.message = "Failed to restore microphone.";
-                    }
+    case GuardianMode::TEST_MODE:
+        ImGui::TextColored(ImVec4(0.0f, 0.8f, 1.0f, 1.0f), "Moonmic Guardian - Test Mode");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped("This is the watchdog process. It normally runs in the background.");
+        ImGui::TextWrapped("Click 'Test Restore' to verify if your microphone can be restored to its original state.");
+        ImGui::Spacing();
+        if (ImGui::Button("Test Restore", ImVec2(120, 40))) {
+            if (GuardianStateManager::readState(ui.state)) {
+                if (platform::restoreMicrophone(ui.state.original_mic_id)) {
+                    ui.mode = GuardianMode::RESULT_SUCCESS;
+                    ui.message = "Microphone restored to: " + ui.state.original_mic_name;
+                    GuardianStateManager::deleteState();
                 } else {
                     ui.mode = GuardianMode::RESULT_FAILED;
-                    ui.message = "No saved microphone state found. Run moonmic-host first.";
+                    ui.message = "Failed to restore microphone.";
                 }
+            } else {
+                ui.mode = GuardianMode::RESULT_FAILED;
+                ui.message = "No saved microphone state found. Run moonmic-host first.";
             }
-            ImGui::SameLine();
-            if (ImGui::Button("Exit", ImVec2(120, 40))) {
-                ui.shouldExit = true;
-            }
-            break;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Exit", ImVec2(120, 40))) {
+            ui.shouldExit = true;
+        }
+        break;
 
-        case GuardianMode::CRASH_DETECTED:
-            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "MoonMic Host Crashed!");
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextWrapped("The main application closed unexpectedly.");
-            ImGui::Spacing();
-            ImGui::TextWrapped("%s", ui.message.c_str());
-            
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            
-            if (ImGui::Button("Dump Log", ImVec2(140, 30))) {
-                dumpLog(ui);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("View Log", ImVec2(140, 30))) {
-                viewLog();
-            }
-            
-            ImGui::Spacing();
-            if (ImGui::Button("Close", ImVec2(120, 40))) {
-                ui.shouldExit = true;
-            }
-            break;
+    case GuardianMode::CRASH_DETECTED:
+        ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Moonmic Host Crashed!");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped("The main application closed unexpectedly.");
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", ui.message.c_str());
 
-        case GuardianMode::RESULT_SUCCESS:
-            ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Success");
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextWrapped("%s", ui.message.c_str());
-            ImGui::Spacing();
-            if (ImGui::Button("Close", ImVec2(120, 40))) {
-                ui.shouldExit = true;
-            }
-            break;
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
 
-        case GuardianMode::RESULT_FAILED:
-            ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Restoration Failed");
-            ImGui::Separator();
-            ImGui::Spacing();
-            ImGui::TextWrapped("%s", ui.message.c_str());
-            ImGui::Spacing();
-            if (ImGui::Button("Close", ImVec2(120, 40))) {
-                ui.shouldExit = true;
-            }
-            break;
+        if (ImGui::Button("Dump Log", ImVec2(140, 30))) {
+            dumpLog(ui);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("View Log", ImVec2(140, 30))) {
+            viewLog();
+        }
 
-        default:
-            ImGui::Text("Monitoring...");
-            break;
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(120, 40))) {
+            ui.shouldExit = true;
+        }
+        break;
+
+    case GuardianMode::RESULT_SUCCESS:
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Success");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", ui.message.c_str());
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(120, 40))) {
+            ui.shouldExit = true;
+        }
+        break;
+
+    case GuardianMode::RESULT_FAILED:
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Restoration Failed");
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextWrapped("%s", ui.message.c_str());
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(120, 40))) {
+            ui.shouldExit = true;
+        }
+        break;
+
+    default:
+        ImGui::Text("Monitoring...");
+        break;
     }
 
     ImGui::End();
@@ -238,7 +228,6 @@ int main(int argc, char* argv[]) {
     UIState ui;
     unsigned long targetPid = 0;
 
-    // Parse arguments
     if (argc >= 2) {
         try {
             targetPid = std::stoul(argv[1]);
@@ -253,10 +242,8 @@ int main(int argc, char* argv[]) {
         ui.windowVisible = true;
     }
 
-    // Initialize GLFW
     if (!glfwInit()) return 1;
 
-    // Window hints
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -264,16 +251,15 @@ int main(int argc, char* argv[]) {
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     }
 
-    GLFWwindow* window = glfwCreateWindow(400, 300, "MoonMic Guardian", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(400, 300, "Moonmic Guardian", NULL, NULL);
     if (!window) {
         glfwTerminate();
         return 1;
     }
 
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable vsync
+    glfwSwapInterval(1);
 
-    // Initialize ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
@@ -281,46 +267,35 @@ int main(int argc, char* argv[]) {
 
     ImGui::StyleColorsDark();
 
-    // Open synchronization events
     std::cout << "[Guardian] Watchdog active. Using Local Events for sync." << std::endl;
-    
-    // Guardian should be robust against missing events (app might have crashed before creating them) even after host exits
+
 #ifdef _WIN32
-    // Use the Shared Constants to ensure Host and Guardian speak the same language
     HANDLE hShutdownEvent = OpenEventA(SYNCHRONIZE, FALSE, GuardianLauncher::SHUTDOWN_EVENT_NAME);
     HANDLE hRestartEvent = OpenEventA(SYNCHRONIZE, FALSE, GuardianLauncher::RESTART_EVENT_NAME);
-    
+
     if (!hShutdownEvent) {
-         // If open failed, maybe it doesn't exist yet (Host startup race?). 
-         // But usually Host creates it before launching Guardian.
-         // If failed due to permissions (Global vs Local), this confirms the issue.
-         // We try to create/open using the constant.
-         hShutdownEvent = CreateEventA(NULL, TRUE, FALSE, GuardianLauncher::SHUTDOWN_EVENT_NAME);
+        hShutdownEvent = CreateEventA(NULL, TRUE, FALSE, GuardianLauncher::SHUTDOWN_EVENT_NAME);
     }
     if (!hRestartEvent) {
-         hRestartEvent = CreateEventA(NULL, TRUE, FALSE, GuardianLauncher::RESTART_EVENT_NAME);
+        hRestartEvent = CreateEventA(NULL, TRUE, FALSE, GuardianLauncher::RESTART_EVENT_NAME);
     }
 #endif
 
-    // Loop
     while (!glfwWindowShouldClose(window) && !ui.shouldExit) {
-        // Monitoring Logic
+
         if (ui.mode == GuardianMode::MONITORING) {
             if (!platform::isProcessAlive(targetPid)) {
-                // Host died!
-                
+
 #ifdef _WIN32
                 bool restartRequested = false;
                 bool normalShutdown = false;
-                
-                // Check for Restart Signal
+
                 if (hRestartEvent) {
                     if (WaitForSingleObject(hRestartEvent, 0) == WAIT_OBJECT_0) {
                         restartRequested = true;
                     }
                 }
-                
-                // Check for Normal Shutdown Signal
+
                 if (hShutdownEvent) {
                     if (WaitForSingleObject(hShutdownEvent, 0) == WAIT_OBJECT_0) {
                         normalShutdown = true;
@@ -328,47 +303,45 @@ int main(int argc, char* argv[]) {
                 }
 
                 if (restartRequested) {
-                    // Restart requested: Relaunch host and exit guardian
+
                     std::cout << "[Guardian] Restart requested. Relaunching host..." << std::endl;
-                    
-                    // Get host path (we are in same dir)
+
                     char exePath[MAX_PATH];
                     GetModuleFileNameA(NULL, exePath, MAX_PATH);
                     std::filesystem::path hostPath = std::filesystem::path(exePath).parent_path() / "moonmic-host.exe";
-                    
+
                     ShellExecuteA(NULL, "open", hostPath.string().c_str(), NULL, NULL, SW_SHOW);
                     ui.shouldExit = true;
-                    
+
                 } else if (normalShutdown) {
-                    // Normal exit: Restore silently if needed and exit
+
                     if (GuardianStateManager::readState(ui.state)) {
-                        // Restore silently
+
                         platform::restoreMicrophone(ui.state.original_mic_id);
                         GuardianStateManager::deleteState();
                     }
                     ui.shouldExit = true;
                 } else {
-                    // Crash detected: Read state and show window
+
                     if (GuardianStateManager::readState(ui.state)) {
                         ui.mode = GuardianMode::CRASH_DETECTED;
-                        
-                        // Auto-restore immediately
+
                         if (platform::restoreMicrophone(ui.state.original_mic_id)) {
                             ui.message = "Microphone restored automatically.";
                             GuardianStateManager::deleteState();
                         } else {
                             ui.message = "Automatic restoration failed.";
                         }
-                        
+
                         ui.windowVisible = true;
                         glfwShowWindow(window);
                     } else {
-                        // No state to restore, just exit
+
                         ui.shouldExit = true;
                     }
                 }
 #else
-                // Linux: Just check state for now
+
                 if (GuardianStateManager::readState(ui.state)) {
                     ui.mode = GuardianMode::CRASH_DETECTED;
                     ui.windowVisible = true;
@@ -380,15 +353,13 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // Event polling
         if (ui.windowVisible) {
             glfwPollEvents();
         } else {
-            // Background mode: check every 500ms
+
             glfwWaitEventsTimeout(0.5);
         }
 
-        // Render
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -406,13 +377,21 @@ int main(int argc, char* argv[]) {
         glfwSwapBuffers(window);
     }
 
-    // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window);
     glfwTerminate();
+
+#ifdef _WIN32
+    if (hShutdownEvent) {
+        CloseHandle(hShutdownEvent);
+    }
+    if (hRestartEvent) {
+        CloseHandle(hRestartEvent);
+    }
+#endif
 
     return 0;
 }

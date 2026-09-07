@@ -1,7 +1,3 @@
-/**
- * @file audio_utils.cpp
- * @brief Windows Audio Utilities implementation
- */
 
 #include "audio_utils.h"
 #include "audio_device_manager.h"
@@ -9,7 +5,6 @@
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys.h>
 
-// Include this BEFORE functiondiscoverykeys_devpkey.h to ensure PKEY definitions are available
 #include <initguid.h>
 #include <functiondiscoverykeys_devpkey.h>
 
@@ -17,8 +12,6 @@
 #include <cfgmgr32.h>
 #include <iostream>
 
-// PKEY_Device_FriendlyName definition (may not be available in MinGW)
-// {a45c254e-df1c-4efd-8020-67d146a850e0}, 14
 #ifndef PKEY_Device_FriendlyName
 DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14);
 #endif
@@ -30,11 +23,11 @@ namespace windows {
 bool GetDefaultRecordingDevice(std::string& deviceId, std::string& friendlyName) {
     AudioDeviceManager manager;
     AudioDeviceInfo info = manager.getCurrentDefaultRecordingDevice();
-    
+
     if (info.id.empty()) {
         return false;
     }
-    
+
     deviceId = info.id;
     friendlyName = info.name;
     return true;
@@ -42,26 +35,25 @@ bool GetDefaultRecordingDevice(std::string& deviceId, std::string& friendlyName)
 
 std::string FindRecordingDeviceID(const std::string& name) {
     if (name.empty()) return "";
-    
+
     AudioDeviceManager manager;
     std::vector<AudioDeviceInfo> devices = manager.enumerateRecordingDevices();
-    
+
     for (const auto& device : devices) {
-        // Match by ID or by name substring
+
         if (device.id == name || device.name.find(name) != std::string::npos) {
             return device.id;
         }
     }
-    
+
     return "";
 }
 
 bool SetDefaultRecordingDevice(const std::string& nameOrId) {
     if (nameOrId.empty()) return false;
-    
+
     std::string targetId = nameOrId;
-    
-    // If it's not an ID (doesn't contain "{"), try to find the ID by name
+
     if (targetId.find("{") == std::string::npos) {
         std::string resolvedId = FindRecordingDeviceID(targetId);
         if (!resolvedId.empty()) {
@@ -90,19 +82,15 @@ bool IsRunningAsAdmin() {
     return fIsRunAsAdmin;
 }
 
-// Helper to toggle device state
 bool ChangeDeviceState(const std::string& name, bool enable) {
     if (name.empty()) return false;
-    
+
     HDEVINFO hDevInfo;
     SP_DEVINFO_DATA DeviceInfoData;
     DWORD i;
 
-    // Create a HDEVINFO with all present devices
-    // Note: Passing "MEDIA" as Enumerator was incorrect (it's a class name). 
-    // We pass NULL for Enumerator to search all PnP enumerators.
     hDevInfo = SetupDiGetClassDevs(NULL, NULL, 0, DIGCF_PRESENT | DIGCF_ALLCLASSES);
-    
+
     if (hDevInfo == INVALID_HANDLE_VALUE) return false;
 
     DeviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
@@ -112,19 +100,17 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
     for (i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &DeviceInfoData); i++) {
         DWORD DataT;
         char friendlyName[256];
-        
-        // Get Friendly Name
+
         if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME,
                                             &DataT, (PBYTE)friendlyName, sizeof(friendlyName), NULL)) {
-            
-            // Log every device we check to debug why Steam isn't found
-            // std::cout << "[AudioUtils] Checking device: " << friendlyName << std::endl; (Removed per user request)
-             
+
+            std::cout << "[AudioUtils] Checking device: " << friendlyName << std::endl;
+
             if (std::string(friendlyName).find(name) != std::string::npos) {
-                // Found match
+
                 found = true;
                 std::cout << "[AudioUtils] Found device for state change: " << friendlyName << std::endl;
-                
+
                 SP_PROPCHANGE_PARAMS params;
                 params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
                 params.ClassInstallHeader.InstallFunction = DIF_PROPERTYCHANGE;
@@ -143,7 +129,7 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
                     std::cerr << "[AudioUtils] SetupDiSetClassInstallParams failed." << std::endl;
                 }
                 // Do not break, to allow handling multiple devices (e.g. Steam Speakers + Mic)
-                // break; 
+
             }
         }
     }
@@ -152,6 +138,6 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
     return success;
 }
 
-} // namespace windows
-} // namespace platform
-} // namespace moonmic
+}
+}
+}

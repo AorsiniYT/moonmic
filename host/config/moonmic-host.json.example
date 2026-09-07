@@ -4,7 +4,7 @@
     "bind_address": "0.0.0.0"
   },
   "audio": {
-    "virtual_device_name": "MoonMic Virtual Microphone",
+    "virtual_device_name": "Moonmic Virtual Microphone",
     "sample_rate": 48000,
     "channels": 1,
     "buffer_size_ms": 20
