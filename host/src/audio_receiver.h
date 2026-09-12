@@ -44,7 +44,9 @@ public:
     ~AudioReceiver();
 
     bool start(const Config& config);
+
     void stop();
+
     bool isRunning() const { return running_; }
 
     void pause();

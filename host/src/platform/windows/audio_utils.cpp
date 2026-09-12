@@ -13,7 +13,8 @@
 #include <iostream>
 
 #ifndef PKEY_Device_FriendlyName
-DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14);
+DEFINE_PROPERTYKEY(PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0,
+                   14);
 #endif
 
 namespace moonmic {
@@ -73,7 +74,8 @@ bool IsRunningAsAdmin() {
     BOOL fIsRunAsAdmin = FALSE;
     PSID pAdminSID = NULL;
     SID_IDENTIFIER_AUTHORITY NtAuthority = SECURITY_NT_AUTHORITY;
-    if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0, &pAdminSID)) {
+    if (AllocateAndInitializeSid(&NtAuthority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0,
+                                 0, &pAdminSID)) {
         if (!CheckTokenMembership(NULL, pAdminSID, &fIsRunAsAdmin)) {
             fIsRunAsAdmin = FALSE;
         }
@@ -94,21 +96,16 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
     if (hDevInfo == INVALID_HANDLE_VALUE) return false;
 
     DeviceInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
-    bool found = false;
     bool success = false;
 
     for (i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &DeviceInfoData); i++) {
         DWORD DataT;
         char friendlyName[256];
 
-        if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME,
-                                            &DataT, (PBYTE)friendlyName, sizeof(friendlyName), NULL)) {
-
-            std::cout << "[AudioUtils] Checking device: " << friendlyName << std::endl;
+        if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &DeviceInfoData, SPDRP_FRIENDLYNAME, &DataT,
+                                              (PBYTE)friendlyName, sizeof(friendlyName), NULL)) {
 
             if (std::string(friendlyName).find(name) != std::string::npos) {
-
-                found = true;
                 std::cout << "[AudioUtils] Found device for state change: " << friendlyName << std::endl;
 
                 SP_PROPCHANGE_PARAMS params;
@@ -118,18 +115,19 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
                 params.Scope = DICS_FLAG_GLOBAL;
                 params.HwProfile = 0;
 
-                if (SetupDiSetClassInstallParams(hDevInfo, &DeviceInfoData, (SP_CLASSINSTALL_HEADER*)&params, sizeof(params))) {
+                if (SetupDiSetClassInstallParams(hDevInfo, &DeviceInfoData, (SP_CLASSINSTALL_HEADER*)&params,
+                                                 sizeof(params))) {
                     if (SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo, &DeviceInfoData)) {
-                        std::cout << "[AudioUtils] Successfully changed state to: " << (enable ? "Enabled" : "Disabled") << " for: " << friendlyName << std::endl;
+                        std::cout << "[AudioUtils] Successfully changed state to: " << (enable ? "Enabled" : "Disabled")
+                                  << " for: " << friendlyName << std::endl;
                         success = true;
                     } else {
-                        std::cerr << "[AudioUtils] SetupDiCallClassInstaller failed. Error: " << GetLastError() << std::endl;
+                        std::cerr << "[AudioUtils] SetupDiCallClassInstaller failed. Error: " << GetLastError()
+                                  << std::endl;
                     }
                 } else {
                     std::cerr << "[AudioUtils] SetupDiSetClassInstallParams failed." << std::endl;
                 }
-                // Do not break, to allow handling multiple devices (e.g. Steam Speakers + Mic)
-
             }
         }
     }
@@ -138,6 +136,6 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
     return success;
 }
 
-}
-}
-}
+} // namespace windows
+} // namespace platform
+} // namespace moonmic

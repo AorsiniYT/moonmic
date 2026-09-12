@@ -170,17 +170,21 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
             std::cout << "[Config] Auto-saved driver selection: " << config.audio.driver_device_name << std::endl;
         }
 
+        moonmic::platform::windows::ChangeDeviceState(config.audio.driver_device_name, true);
+
         if (receiver.isRunning()) {
             std::cout << "[Main] Switching to " << driver_names[selected_driver] << ", restarting receiver..." << std::endl;
             receiver.stop();
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        } else {
+             std::cout << "[Main] Driver switched, attempting to start receiver..." << std::endl;
+        }
 
-            if (receiver.start(config)) {
-                std::cout << "[Main] Receiver restarted successfully with new driver" << std::endl;
-            } else {
-                std::cerr << "[Main] Failed to restart receiver with new driver" << std::endl;
-            }
+        if (receiver.start(config)) {
+            std::cout << "[Main] Receiver restarted successfully with new driver" << std::endl;
+        } else {
+            std::cerr << "[Main] Failed to restart receiver with new driver" << std::endl;
         }
     }
 
@@ -1163,9 +1167,15 @@ int main_gui(int argc, char* argv[]) {
         std::string driverName = config.audio.driver_device_name;
         if (!driverName.empty()) {
 
-             if (driverName.find("Steam") != std::string::npos || driverName.find("VB-") != std::string::npos) {
+             bool isSteam = (driverName.find("Steam") != std::string::npos);
+             if (isSteam || driverName.find("VB-") != std::string::npos) {
                  std::cout << "[Main] Ensuring driver is enabled: " << driverName << std::endl;
                  moonmic::platform::windows::ChangeDeviceState(driverName, true);
+
+                 if (isSteam) {
+                     DriverInstaller installer;
+                     installer.disableSteamStreamingSpeakers();
+                 }
              }
         }
     }

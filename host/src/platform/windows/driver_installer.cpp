@@ -2,6 +2,8 @@
 #include "driver_installer.h"
 #define INITGUID
 #include <windows.h>
+#include <mmreg.h>
+#include <shellapi.h>
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <setupapi.h>
@@ -17,33 +19,29 @@
 #endif
 
 #ifndef GUID_NULL
-const GUID GUID_NULL = { 0, 0, 0, { 0, 0, 0, 0, 0, 0, 0, 0 } };
+const GUID GUID_NULL = {0, 0, 0, {0, 0, 0, 0, 0, 0, 0, 0}};
 #endif
 
-typedef enum DeviceShareMode {
-    DeviceShareModeShared,
-    DeviceShareModeExclusive
-} DeviceShareMode;
+typedef enum DeviceShareMode { DeviceShareModeShared, DeviceShareModeExclusive } DeviceShareMode;
 
-interface IPolicyConfig : public IUnknown
-{
-public:
-    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, WAVEFORMATEX **) = 0;
-    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, WAVEFORMATEX **) = 0;
+interface IPolicyConfig : public IUnknown {
+  public:
+    virtual HRESULT STDMETHODCALLTYPE GetMixFormat(PCWSTR, WAVEFORMATEX**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetDeviceFormat(PCWSTR, INT, WAVEFORMATEX**) = 0;
     virtual HRESULT STDMETHODCALLTYPE ResetDeviceFormat(PCWSTR) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, WAVEFORMATEX *, WAVEFORMATEX *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetDeviceFormat(PCWSTR, WAVEFORMATEX*, WAVEFORMATEX*) = 0;
     virtual HRESULT STDMETHODCALLTYPE GetProcessingPeriod(PCWSTR, INT, PINT64, PINT64) = 0;
     virtual HRESULT STDMETHODCALLTYPE SetProcessingPeriod(PCWSTR, PINT64) = 0;
-    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, DeviceShareMode *) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, DeviceShareMode *) = 0;
-    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY &, PROPVARIANT *) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY &, PROPVARIANT *) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetShareMode(PCWSTR, DeviceShareMode*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetShareMode(PCWSTR, DeviceShareMode*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetPropertyValue(PCWSTR, const PROPERTYKEY&, PROPVARIANT*) = 0;
     virtual HRESULT STDMETHODCALLTYPE SetDefaultEndpoint(PCWSTR, ERole) = 0;
     virtual HRESULT STDMETHODCALLTYPE SetEndpointVisibility(PCWSTR, INT) = 0;
 };
 
-static const IID IID_IPolicyConfig = { 0xf8679f50, 0x850a, 0x41cf, { 0x9c, 0x72, 0x43, 0x0f, 0x29, 0x02, 0x90, 0xc8 } };
-static const CLSID CLSID_PolicyConfig = { 0x870af99c, 0x171d, 0x4f9e, { 0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9 } };
+static const IID IID_IPolicyConfig = {0xf8679f50, 0x850a, 0x41cf, {0x9c, 0x72, 0x43, 0x0f, 0x29, 0x02, 0x90, 0xc8}};
+static const CLSID CLSID_PolicyConfig = {0x870af99c, 0x171d, 0x4f9e, {0xaf, 0x0d, 0xe6, 0x3d, 0xf4, 0x0c, 0x2b, 0xc9}};
 
 namespace moonmic {
 
@@ -60,10 +58,8 @@ bool DriverInstaller::isRunningAsAdmin() {
     PSID admin_group = NULL;
     SID_IDENTIFIER_AUTHORITY nt_authority = SECURITY_NT_AUTHORITY;
 
-    if (AllocateAndInitializeSid(&nt_authority, 2,
-        SECURITY_BUILTIN_DOMAIN_RID,
-        DOMAIN_ALIAS_RID_ADMINS,
-        0, 0, 0, 0, 0, 0, &admin_group)) {
+    if (AllocateAndInitializeSid(&nt_authority, 2, SECURITY_BUILTIN_DOMAIN_RID, DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0,
+                                 0, &admin_group)) {
 
         CheckTokenMembership(NULL, admin_group, &is_admin);
         FreeSid(admin_group);
@@ -76,7 +72,8 @@ bool DriverInstaller::restartAsAdmin() {
     char exe_path[MAX_PATH];
     GetModuleFileNameA(NULL, exe_path, MAX_PATH);
 
-    SHELLEXECUTEINFOA sei = { sizeof(sei) };
+    SHELLEXECUTEINFOA sei = {};
+    sei.cbSize = sizeof(sei);
     sei.lpVerb = "runas";
     sei.lpFile = exe_path;
     sei.hwnd = NULL;
@@ -108,13 +105,8 @@ std::string DriverInstaller::getVBCableInputDevice() {
 
     CoInitialize(NULL);
 
-    hr = CoCreateInstance(
-        __uuidof(MMDeviceEnumerator),
-        NULL,
-        CLSCTX_ALL,
-        __uuidof(IMMDeviceEnumerator),
-        (void**)&enumerator
-    );
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                          (void**)&enumerator);
 
     if (FAILED(hr)) {
         CoUninitialize();
@@ -180,13 +172,8 @@ std::string DriverInstaller::getVBCableOutputDevice() {
 
     CoInitialize(NULL);
 
-    hr = CoCreateInstance(
-        __uuidof(MMDeviceEnumerator),
-        NULL,
-        CLSCTX_ALL,
-        __uuidof(IMMDeviceEnumerator),
-        (void**)&enumerator
-    );
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                          (void**)&enumerator);
 
     if (FAILED(hr)) {
         CoUninitialize();
@@ -251,7 +238,7 @@ bool DriverInstaller::installVBCable() {
         return false;
     }
 
-    return runSetupExecutable(false);
+    return installEmbeddedVBCable();
 }
 
 bool DriverInstaller::uninstallVBCable() {
@@ -260,7 +247,7 @@ bool DriverInstaller::uninstallVBCable() {
         return false;
     }
 
-    return runSetupExecutable(true);
+    return removeVBCableDriver();
 }
 
 bool DriverInstaller::isAnyDriverInstalled() {
@@ -290,15 +277,7 @@ bool DriverInstaller::extractResourceToFile(const char* resource_name, const std
         return false;
     }
 
-    HANDLE hFile = CreateFileA(
-        output_path.c_str(),
-        GENERIC_WRITE,
-        0,
-        NULL,
-        CREATE_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
+    HANDLE hFile = CreateFileA(output_path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
         std::cerr << "[DriverInstaller] Failed to create: " << output_path << std::endl;
@@ -312,59 +291,58 @@ bool DriverInstaller::extractResourceToFile(const char* resource_name, const std
     return (bResult && dwBytesWritten == dwResourceSize);
 }
 
-bool DriverInstaller::extractEmbeddedInstaller(const std::string& temp_dir) {
+bool DriverInstaller::extractEmbeddedVBCable(const std::string& temp_dir) {
     std::cout << "[DriverInstaller] Extracting embedded VB-CABLE driver files..." << std::endl;
 
-    std::filesystem::create_directories(temp_dir);
+    std::error_code error;
+    std::filesystem::remove_all(temp_dir, error);
+    error.clear();
+    if (!std::filesystem::create_directories(temp_dir, error) || error) {
+        std::cerr << "[DriverInstaller] Failed to create temporary directory: " << temp_dir << std::endl;
+        return false;
+    }
 
     struct ResourceFile {
         const char* resource;
         const char* filename;
     };
 
-    ResourceFile files[] = {
+    ResourceFile files[] = {{"IDR_DRIVER_WIN10_INF", "vbMmeCable64_win10.inf"},
+                            {"IDR_DRIVER_WIN10_SYS", "vbaudio_cable64_win10.sys"},
+                            {"IDR_DRIVER_WIN10_CAT", "vbaudio_cable64_win10.cat"},
+                            {"IDR_DRIVER_WIN10_ARM_SYS", "vbaudio_cable64arm_win10.sys"},
 
-        {"IDR_VBCABLE_SETUP_X64", "VBCABLE_Setup_x64.exe"},
-        {"IDR_VBCABLE_SETUP", "VBCABLE_Setup.exe"},
-        {"IDR_VBCABLE_CONTROLPANEL", "VBCABLE_ControlPanel.exe"},
+                            {"IDR_DRIVER_WIN7_64_INF", "vbMmeCable64_win7.inf"},
+                            {"IDR_DRIVER_WIN7_64_SYS", "vbaudio_cable64_win7.sys"},
+                            {"IDR_DRIVER_WIN7_64_CAT", "vbaudio_cable64_win7.cat"},
 
-        {"IDR_DRIVER_WIN10_INF", "vbMmeCable64_win10.inf"},
-        {"IDR_DRIVER_WIN10_SYS", "vbaudio_cable64_win10.sys"},
-        {"IDR_DRIVER_WIN10_CAT", "vbaudio_cable64_win10.cat"},
-        {"IDR_DRIVER_WIN10_ARM_SYS", "vbaudio_cable64arm_win10.sys"},
+                            {"IDR_DRIVER_VISTA_64_INF", "vbMmeCable64_vista.inf"},
+                            {"IDR_DRIVER_VISTA_64_SYS", "vbaudio_cable64_vista.sys"},
+                            {"IDR_DRIVER_VISTA_64_CAT", "vbaudio_cable64_vista.cat"},
 
-        {"IDR_DRIVER_WIN7_64_INF", "vbMmeCable64_win7.inf"},
-        {"IDR_DRIVER_WIN7_64_SYS", "vbaudio_cable64_win7.sys"},
-        {"IDR_DRIVER_WIN7_64_CAT", "vbaudio_cable64_win7.cat"},
+                            {"IDR_DRIVER_2003_64_INF", "vbMmeCable64_2003.inf"},
+                            {"IDR_DRIVER_2003_64_SYS", "vbaudio_cable64_2003.sys"},
+                            {"IDR_DRIVER_2003_64_CAT", "vbaudio_cable64_2003.cat"},
 
-        {"IDR_DRIVER_VISTA_64_INF", "vbMmeCable64_vista.inf"},
-        {"IDR_DRIVER_VISTA_64_SYS", "vbaudio_cable64_vista.sys"},
-        {"IDR_DRIVER_VISTA_64_CAT", "vbaudio_cable64_vista.cat"},
+                            {"IDR_DRIVER_WIN7_32_INF", "vbMmeCable_win7.inf"},
+                            {"IDR_DRIVER_WIN7_32_SYS", "vbaudio_cable_win7.sys"},
+                            {"IDR_DRIVER_WIN7_32_CAT", "vbaudio_cable_win7.cat"},
 
-        {"IDR_DRIVER_2003_64_INF", "vbMmeCable64_2003.inf"},
-        {"IDR_DRIVER_2003_64_SYS", "vbaudio_cable64_2003.sys"},
-        {"IDR_DRIVER_2003_64_CAT", "vbaudio_cable64_2003.cat"},
+                            {"IDR_DRIVER_VISTA_32_INF", "vbMmeCable_vista.inf"},
+                            {"IDR_DRIVER_VISTA_32_SYS", "vbaudio_cable_vista.sys"},
+                            {"IDR_DRIVER_VISTA_32_CAT", "vbaudio_cable_vista.cat"},
 
-        {"IDR_DRIVER_WIN7_32_INF", "vbMmeCable_win7.inf"},
-        {"IDR_DRIVER_WIN7_32_SYS", "vbaudio_cable_win7.sys"},
-        {"IDR_DRIVER_WIN7_32_CAT", "vbaudio_cable_win7.cat"},
+                            {"IDR_DRIVER_XP_INF", "vbMmeCable_xp.inf"},
+                            {"IDR_DRIVER_XP_SYS", "vbaudio_cable_xp.sys"},
+                            {"IDR_DRIVER_XP_CAT", "vbaudio_cable_xp.cat"},
 
-        {"IDR_DRIVER_VISTA_32_INF", "vbMmeCable_vista.inf"},
-        {"IDR_DRIVER_VISTA_32_SYS", "vbaudio_cable_vista.sys"},
-        {"IDR_DRIVER_VISTA_32_CAT", "vbaudio_cable_vista.cat"},
+                            {"IDR_DRIVER_2003_32_INF", "vbMmeCable_2003.inf"},
+                            {"IDR_DRIVER_2003_32_SYS", "vbaudio_cable_2003.sys"},
+                            {"IDR_DRIVER_2003_32_CAT", "vbaudio_cable_2003.cat"},
 
-        {"IDR_DRIVER_XP_INF", "vbMmeCable_xp.inf"},
-        {"IDR_DRIVER_XP_SYS", "vbaudio_cable_xp.sys"},
-        {"IDR_DRIVER_XP_CAT", "vbaudio_cable_xp.cat"},
-
-        {"IDR_DRIVER_2003_32_INF", "vbMmeCable_2003.inf"},
-        {"IDR_DRIVER_2003_32_SYS", "vbaudio_cable_2003.sys"},
-        {"IDR_DRIVER_2003_32_CAT", "vbaudio_cable_2003.cat"},
-
-        {"IDR_ICON_PIN_IN", "pin_in.ico"},
-        {"IDR_ICON_PIN_OUT", "pin_out.ico"},
-        {"IDR_README_TXT", "readme.txt"}
-    };
+                            {"IDR_ICON_PIN_IN", "pin_in.ico"},
+                            {"IDR_ICON_PIN_OUT", "pin_out.ico"},
+                            {"IDR_README_TXT", "readme.txt"}};
 
     int extracted = 0;
     for (const auto& file : files) {
@@ -375,7 +353,7 @@ bool DriverInstaller::extractEmbeddedInstaller(const std::string& temp_dir) {
     }
 
     std::cout << "[DriverInstaller] Extracted " << extracted << " files to: " << temp_dir << std::endl;
-    return extracted > 0;
+    return extracted == static_cast<int>(sizeof(files) / sizeof(files[0]));
 }
 
 void DriverInstaller::cleanupTempDir(const std::string& temp_dir) {
@@ -389,87 +367,62 @@ void DriverInstaller::cleanupTempDir(const std::string& temp_dir) {
     }
 }
 
-bool DriverInstaller::runSetupExecutable(bool uninstall) {
-
-    SYSTEM_INFO sys_info;
-    GetNativeSystemInfo(&sys_info);
-
-    std::string setup_exe;
-    std::string temp_dir_path;
-    bool use_embedded = false;
-
-    std::filesystem::path external_driver_path = std::filesystem::path(driver_path_).parent_path() / "drivers" / "vbaudio";
-
-    std::string base_path = external_driver_path.string();
-    if (!std::filesystem::exists(base_path)) {
-        // Fallback to old 'driver' folder if needed
-         base_path = driver_path_;
-    }
-
-    if (sys_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) {
-        setup_exe = base_path + "\\VBCABLE_Setup_x64.exe";
-    } else {
-        setup_exe = base_path + "\\VBCABLE_Setup.exe";
-    }
-
-    if (!std::filesystem::exists(setup_exe)) {
-        std::cout << "[DriverInstaller] Driver folder not found, using embedded files" << std::endl;
-
-        char temp_path[MAX_PATH];
-        GetTempPathA(MAX_PATH, temp_path);
-        temp_dir_path = std::string(temp_path) + "moonmic_vbcable";
-
-        if (!extractEmbeddedInstaller(temp_dir_path)) {
-            std::cerr << "[DriverInstaller] Failed to extract embedded files" << std::endl;
-            return false;
-        }
-
-        if (sys_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64) {
-            setup_exe = temp_dir_path + "\\VBCABLE_Setup_x64.exe";
-        } else {
-            setup_exe = temp_dir_path + "\\VBCABLE_Setup.exe";
-        }
-
-        use_embedded = true;
-    }
-
-    std::cout << "[DriverInstaller] Running: " << setup_exe << std::endl;
-
-    SHELLEXECUTEINFOA sei = { sizeof(sei) };
-    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-    sei.lpVerb = "runas";
-    sei.lpFile = setup_exe.c_str();
-    sei.nShow = SW_SHOW;
-
-    if (!ShellExecuteExA(&sei)) {
-        std::cerr << "[DriverInstaller] Failed to run setup" << std::endl;
-        if (use_embedded) {
-            cleanupTempDir(temp_dir_path);
-        }
+bool DriverInstaller::installEmbeddedVBCable() {
+    char temp_path[MAX_PATH];
+    if (!GetTempPathA(MAX_PATH, temp_path)) {
         return false;
     }
 
-    bool success = false;
-    if (sei.hProcess) {
-        WaitForSingleObject(sei.hProcess, INFINITE);
-
-        DWORD exit_code;
-        GetExitCodeProcess(sei.hProcess, &exit_code);
-        CloseHandle(sei.hProcess);
-
-        if (exit_code == 0) {
-            std::cout << "[DriverInstaller] Installation/Removal process finished." << std::endl;
-            success = true;
-        } else {
-            std::cerr << "[DriverInstaller] Process exited with code: " << exit_code << std::endl;
-        }
+    const std::string temp_dir = std::string(temp_path) + "moonmic_vbcable";
+    if (!extractEmbeddedVBCable(temp_dir)) {
+        cleanupTempDir(temp_dir);
+        return false;
     }
 
-    if (use_embedded) {
-        cleanupTempDir(temp_dir_path);
+    SYSTEM_INFO system_info;
+    GetNativeSystemInfo(&system_info);
+    const bool use_64_bit_package = system_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64 ||
+                                    system_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_ARM64;
+    const char* inf_name = use_64_bit_package ? "vbMmeCable64_win10.inf" : "vbMmeCable_win7.inf";
+    const std::filesystem::path inf_path = std::filesystem::path(temp_dir) / inf_name;
+    const bool installed = createRootDevice("VBAudioVACWDM", inf_path.string());
+    cleanupTempDir(temp_dir);
+    return installed;
+}
+
+bool DriverInstaller::removeVBCableDriver() {
+    removeDevicesByHardwareId("VBAudioVACWDM");
+
+    const char* script =
+        "$drivers = Get-WindowsDriver -Online -All | Where-Object { $_.OriginalFileName -like '*vbMmeCable*.inf*' }; "
+        "$failed = $false; "
+        "foreach ($driver in $drivers) { pnputil /delete-driver $driver.Driver /uninstall /force | Out-Host; "
+        "if ($LASTEXITCODE -ne 0) { $failed = $true } }; "
+        "if ($failed) { exit 1 }";
+    std::string arguments = "-NoProfile -ExecutionPolicy Bypass -Command \"";
+    arguments += script;
+    arguments += "\"";
+
+    SHELLEXECUTEINFOA process = {};
+    process.cbSize = sizeof(process);
+    process.fMask = SEE_MASK_NOCLOSEPROCESS;
+    process.lpVerb = "runas";
+    process.lpFile = "powershell.exe";
+    process.lpParameters = arguments.c_str();
+    process.nShow = SW_HIDE;
+    if (!ShellExecuteExA(&process)) {
+        return false;
     }
 
-    return success;
+    if (!process.hProcess) {
+        return false;
+    }
+
+    const DWORD wait_result = WaitForSingleObject(process.hProcess, 60000);
+    DWORD exit_code = 1;
+    const bool completed = wait_result == WAIT_OBJECT_0 && GetExitCodeProcess(process.hProcess, &exit_code);
+    CloseHandle(process.hProcess);
+    return completed && exit_code == 0;
 }
 
 bool DriverInstaller::isSteamMicrophoneInstalled() {
@@ -483,24 +436,19 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
 
     hr = CoInitialize(NULL);
 
-    hr = CoCreateInstance(
-        __uuidof(MMDeviceEnumerator),
-        NULL,
-        CLSCTX_ALL,
-        __uuidof(IMMDeviceEnumerator),
-        (void**)&enumerator
-    );
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                          (void**)&enumerator);
 
     if (SUCCEEDED(hr)) {
 
-        EDataFlow flows[] = { eCapture, eRender };
+        EDataFlow flows[] = {eCapture, eRender};
 
         for (EDataFlow flow : flows) {
-             IMMDeviceCollection* collection = NULL;
+            IMMDeviceCollection* collection = NULL;
 
-             hr = enumerator->EnumAudioEndpoints(flow, DEVICE_STATEMASK_ALL, &collection);
+            hr = enumerator->EnumAudioEndpoints(flow, DEVICE_STATEMASK_ALL, &collection);
 
-             if (SUCCEEDED(hr)) {
+            if (SUCCEEDED(hr)) {
                 UINT count;
                 collection->GetCount(&count);
 
@@ -522,7 +470,6 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
 
                                 if (wname.find(targetName) != std::wstring::npos) {
                                     found = true;
-
                                 }
                             }
                             PropVariantClear(&varName);
@@ -534,7 +481,6 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
                                     std::wstring wdesc(varName.pwszVal);
                                     if (wdesc.find(targetName) != std::wstring::npos) {
                                         found = true;
-
                                     }
                                 }
                                 PropVariantClear(&varName);
@@ -565,14 +511,15 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
             for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData); i++) {
                 char buffer[4096];
 
-                if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)buffer, sizeof(buffer), NULL)) {
+                if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)buffer,
+                                                      sizeof(buffer), NULL)) {
 
                     char* p = buffer;
-                    while (*p && (p - buffer < sizeof(buffer))) {
+                    while (p < buffer + sizeof(buffer) && *p) {
                         std::string hwId = p;
 
                         std::transform(hwId.begin(), hwId.end(), hwId.begin(),
-                            [](unsigned char c){ return std::tolower(c); });
+                                       [](unsigned char c) { return std::tolower(c); });
 
                         if (hwId.find("steamstreamingmicrophone") != std::string::npos) {
                             found = true;
@@ -584,7 +531,8 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
 
                 if (found) break;
 
-                if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_FRIENDLYNAME, NULL, (PBYTE)buffer, sizeof(buffer), NULL)) {
+                if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_FRIENDLYNAME, NULL, (PBYTE)buffer,
+                                                      sizeof(buffer), NULL)) {
                     std::string name = buffer;
                     if (name.find("Steam Streaming Microphone") != std::string::npos) {
                         found = true;
@@ -598,15 +546,14 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
         }
     }
 
-    // Do not uninitialize if we didn't initialize it (S_FALSE), but CoUninitialize handles balancing usually.
-
     CoUninitialize();
 
     return found;
 }
 
 bool DriverInstaller::extractEmbeddedSteamDriver(const std::string& temp_dir, bool is_x64) {
-    std::cout << "[DriverInstaller] Extracting embedded Steam driver files (" << (is_x64 ? "x64" : "x86") << ")..." << std::endl;
+    std::cout << "[DriverInstaller] Extracting embedded Steam driver files (" << (is_x64 ? "x64" : "x86") << ")..."
+              << std::endl;
 
     std::filesystem::create_directories(temp_dir);
 
@@ -618,19 +565,13 @@ bool DriverInstaller::extractEmbeddedSteamDriver(const std::string& temp_dir, bo
     std::vector<ResourceFile> files;
 
     if (is_x64) {
-        files = {
-            {"IDR_STEAM_MIC_X64_INF", "SteamStreamingMicrophone.inf"},
-            {"IDR_STEAM_MIC_X64_SYS", "SteamStreamingMicrophone.sys"},
-            {"IDR_STEAM_MIC_X64_CAT", "steamstreamingmicrophone.cat"},
-            {"IDR_STEAM_X64_DLL", "WdfCoinstaller01009.dll"}
-        };
+        files = {{"IDR_STEAM_MIC_X64_INF", "SteamStreamingMicrophone.inf"},
+                 {"IDR_STEAM_MIC_X64_SYS", "SteamStreamingMicrophone.sys"},
+                 {"IDR_STEAM_MIC_X64_CAT", "steamstreamingmicrophone.cat"}};
     } else {
-        files = {
-            {"IDR_STEAM_MIC_X86_INF", "SteamStreamingMicrophone.inf"},
-            {"IDR_STEAM_MIC_X86_SYS", "SteamStreamingMicrophone.sys"},
-            {"IDR_STEAM_MIC_X86_CAT", "steamstreamingmicrophone.cat"},
-            {"IDR_STEAM_X86_DLL", "WdfCoinstaller01009.dll"}
-        };
+        files = {{"IDR_STEAM_MIC_X86_INF", "SteamStreamingMicrophone.inf"},
+                 {"IDR_STEAM_MIC_X86_SYS", "SteamStreamingMicrophone.sys"},
+                 {"IDR_STEAM_MIC_X86_CAT", "steamstreamingmicrophone.cat"}};
     }
 
     int extracted = 0;
@@ -645,9 +586,9 @@ bool DriverInstaller::extractEmbeddedSteamDriver(const std::string& temp_dir, bo
 }
 
 bool DriverInstaller::installSteamMicrophone() {
-
     if (isSteamMicrophoneInstalled()) {
-        std::cout << "[DriverInstaller] Steam Streaming Microphone is already installed. Skipping installation." << std::endl;
+        std::cout << "[DriverInstaller] Steam Streaming Microphone is already installed. Skipping installation."
+                  << std::endl;
         return true;
     }
 
@@ -658,20 +599,20 @@ bool DriverInstaller::installSteamMicrophone() {
 
     SYSTEM_INFO sys_info;
     GetNativeSystemInfo(&sys_info);
-    bool is_x64 = (sys_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64);
+    const bool is_x64 = sys_info.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
 
     char temp_path[MAX_PATH];
-    GetTempPathA(MAX_PATH, temp_path);
+    if (!GetTempPathA(MAX_PATH, temp_path)) {
+        return false;
+    }
     std::string temp_dir_path = std::string(temp_path) + "moonmic_steam_" + (is_x64 ? "x64" : "x86");
 
-    if (!extractEmbeddedSteamDriver(temp_dir_path, is_x64)) {
+    const bool extracted = extractEmbeddedSteamDriver(temp_dir_path, is_x64);
+    if (!extracted) {
         std::cerr << "[DriverInstaller] Failed to extract embedded Steam drivers." << std::endl;
-        // Fallback or fail? User explicitly asked for embedded, so we rely on it.
-
-        // We will fallback to looking in drivers folder just in case development environment.
-
         std::string arch_dir = is_x64 ? "x64" : "x86";
-        std::filesystem::path base_driver_dir = std::filesystem::path(driver_path_).parent_path() / "drivers" / "SVACDriver";
+        std::filesystem::path base_driver_dir =
+            std::filesystem::path(driver_path_).parent_path() / "drivers" / "SVACDriver";
         temp_dir_path = (base_driver_dir / arch_dir).string();
 
         std::cout << "[DriverInstaller] Fallback: Looking in " << temp_dir_path << std::endl;
@@ -683,6 +624,9 @@ bool DriverInstaller::installSteamMicrophone() {
 
     if (!std::filesystem::exists(mic_inf_path)) {
         std::cerr << "[DriverInstaller] Steam Microphone INF not found at: " << mic_inf_path << std::endl;
+        if (extracted) {
+            cleanupTempDir(temp_dir_path);
+        }
         return false;
     }
 
@@ -694,22 +638,19 @@ bool DriverInstaller::installSteamMicrophone() {
 
     if (isSteamMicrophoneInstalled()) {
         std::cout << "[DriverInstaller] Device detected after adding driver." << std::endl;
-        if (temp_dir_path.find("moonmic_steam") != std::string::npos) {
+        if (extracted) {
             cleanupTempDir(temp_dir_path);
         }
 
         disableSteamStreamingSpeakers();
-
         return true;
     }
 
     removeDevicesByHardwareId("STEAMSTREAMINGMICROPHONE");
-
     std::cout << "[DriverInstaller] Creating root device node..." << std::endl;
+    const bool success = createRootDevice("STEAMSTREAMINGMICROPHONE", mic_inf_path.string());
 
-    bool success = createRootDevice("STEAMSTREAMINGMICROPHONE", mic_inf_path.string());
-
-    if (temp_dir_path.find("moonmic_steam") != std::string::npos) {
+    if (extracted) {
         cleanupTempDir(temp_dir_path);
     }
 
@@ -717,7 +658,6 @@ bool DriverInstaller::installSteamMicrophone() {
         std::cout << "[DriverInstaller] Steam Driver installed successfully." << std::endl;
 
         disableSteamStreamingSpeakers();
-
         return true;
     } else {
         std::cerr << "[DriverInstaller] Installation failed." << std::endl;
@@ -736,16 +676,15 @@ bool DriverInstaller::uninstallSteamMicrophone() {
     std::cout << "[DriverInstaller] Removing PnP Device Nodes..." << std::endl;
     removeDevicesByHardwareId("STEAMSTREAMINGMICROPHONE");
 
-    // For uninstall, we must delete the published OEM INF (oemXX.inf).
-
-    const char* ps_script =
-        "$drivers = Get-WindowsDriver -Online -All | Where-Object { $_.OriginalFileName -like '*SteamStreamingMicrophone.inf*' }; "
-        "if ($drivers) { "
-        "  foreach ($d in $drivers) { "
-        "    Write-Host 'Removing driver: ' $d.Driver; "
-        "    pnputil /delete-driver $d.Driver /uninstall /force | Out-Host "
-        "  } "
-        "} else { Write-Host 'No Steam Microphone drivers found.' }";
+    // Installed packages use an OEM INF name, which must be resolved before removal.
+    const char* ps_script = "$drivers = Get-WindowsDriver -Online -All | Where-Object { $_.OriginalFileName -like "
+                            "'*SteamStreamingMicrophone.inf*' }; "
+                            "if ($drivers) { "
+                            "  foreach ($d in $drivers) { "
+                            "    Write-Host 'Removing driver: ' $d.Driver; "
+                            "    pnputil /delete-driver $d.Driver /uninstall /force | Out-Host "
+                            "  } "
+                            "} else { Write-Host 'No Steam Microphone drivers found.' }";
 
     std::string ps_args;
     ps_args.reserve(1024);
@@ -755,7 +694,8 @@ bool DriverInstaller::uninstallSteamMicrophone() {
 
     std::cout << "[DriverInstaller] Executing uninstall script..." << std::endl;
 
-    SHELLEXECUTEINFOA sei = { sizeof(sei) };
+    SHELLEXECUTEINFOA sei = {};
+    sei.cbSize = sizeof(sei);
     sei.fMask = SEE_MASK_NOCLOSEPROCESS;
     sei.lpVerb = "runas";
     sei.lpFile = "powershell.exe";
@@ -786,7 +726,7 @@ bool DriverInstaller::uninstallSteamMicrophone() {
         }
     }
 
-    return true;
+    return false;
 }
 
 bool DriverInstaller::createRootDevice(const std::string& hardwareId, const std::string& infPath) {
@@ -816,7 +756,8 @@ bool DriverInstaller::createRootDevice(const std::string& hardwareId, const std:
     std::vector<char> hwIdBuffer(hardwareId.length() + 2, 0);
     memcpy(hwIdBuffer.data(), hardwareId.c_str(), hardwareId.length());
 
-    if (!SetupDiSetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, (const BYTE*)hwIdBuffer.data(), (DWORD)hwIdBuffer.size())) {
+    if (!SetupDiSetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, (const BYTE*)hwIdBuffer.data(),
+                                           (DWORD)hwIdBuffer.size())) {
         std::cerr << "[DriverInstaller] Failed to set Hardware ID. Error: " << GetLastError() << std::endl;
         SetupDiDestroyDeviceInfoList(hDevInfo);
         return false;
@@ -831,14 +772,12 @@ bool DriverInstaller::createRootDevice(const std::string& hardwareId, const std:
     Sleep(1000);
 
     BOOL rebootRequired = FALSE;
-
-    BOOL result = UpdateDriverForPlugAndPlayDevicesA(NULL, hardwareId.c_str(), infPath.c_str(), INSTALLFLAG_FORCE, &rebootRequired);
+    BOOL result = UpdateDriverForPlugAndPlayDevicesA(NULL, hardwareId.c_str(), infPath.c_str(), INSTALLFLAG_FORCE,
+                                                     &rebootRequired);
 
     if (!result) {
         DWORD err = GetLastError();
         std::cerr << "[DriverInstaller] UpdateDriverForPlugAndPlayDevices failed: " << err << std::endl;
-
-        // Fallback: Try DiInstallDriver (from newdev.dll)
 
         std::cerr << "[DriverInstaller] Cleaning up failed device creation..." << std::endl;
         SetupDiCallClassInstaller(DIF_REMOVE, hDevInfo, &devInfoData);
@@ -859,10 +798,11 @@ void DriverInstaller::removeDevicesByHardwareId(const std::string& hardwareId) {
 
     for (DWORD i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, &devInfoData); i++) {
         char buffer[4096];
-        if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)buffer, sizeof(buffer), NULL)) {
+        if (SetupDiGetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, NULL, (PBYTE)buffer,
+                                              sizeof(buffer), NULL)) {
             char* p = buffer;
             bool match = false;
-            while (*p && (p - buffer < sizeof(buffer))) {
+            while (p < buffer + sizeof(buffer) && *p) {
                 std::string id = p;
 
                 std::transform(id.begin(), id.end(), id.begin(), ::tolower);
@@ -893,7 +833,8 @@ bool DriverInstaller::disableSteamStreamingSpeakers() {
     IPolicyConfig* policyConfig = NULL;
     bool found = false;
 
-    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&enumerator);
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                          (void**)&enumerator);
     if (FAILED(hr)) return false;
 
     hr = CoCreateInstance(CLSID_PolicyConfig, NULL, CLSCTX_ALL, IID_IPolicyConfig, (void**)&policyConfig);
@@ -934,10 +875,12 @@ bool DriverInstaller::disableSteamStreamingSpeakers() {
 
                                 hr = policyConfig->SetEndpointVisibility(id, 0);
                                 if (SUCCEEDED(hr)) {
-                                    std::cout << "[DriverInstaller] Successfully disabled playback endpoint." << std::endl;
+                                    std::cout << "[DriverInstaller] Successfully disabled playback endpoint."
+                                              << std::endl;
                                     found = true;
                                 } else {
-                                    std::cerr << "[DriverInstaller] Failed to disable endpoint. HR=" << std::hex << hr << std::endl;
+                                    std::cerr << "[DriverInstaller] Failed to disable endpoint. HR=" << std::hex << hr
+                                              << std::endl;
                                 }
                                 CoTaskMemFree(id);
                             }
@@ -958,4 +901,4 @@ bool DriverInstaller::disableSteamStreamingSpeakers() {
     return found;
 }
 
-}
+} // namespace moonmic

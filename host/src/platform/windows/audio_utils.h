@@ -24,6 +24,6 @@ bool ChangeDeviceState(const std::string& name, bool enable);
 
 bool IsRunningAsAdmin();
 
-}
-}
-}
+} // namespace windows
+} // namespace platform
+} // namespace moonmic
