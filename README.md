@@ -13,13 +13,13 @@ it to a virtual microphone.
 
 The default UDP port is `48100`. Audio is sent as Opus or signed 16-bit PCM.
 Protocol declarations shared by clients and the host are in
-[`moonmic.h`](moonmic.h) (header-only, shared with the host).
+[`moonmic_protocol.h`](include/moonmic_protocol.h).
 
 ## Layout
 
 ```text
 codec/       Client codecs
-include/     Public client headers
+include/     Public client and protocol headers
 network/     Client transport
 platform/    Client platform implementations
 src/         Client implementation and private headers
@@ -45,6 +45,14 @@ target_link_libraries(your_target PRIVATE moonmic::moonmic)
 
 See [INTEGRATION.md](INTEGRATION.md) for the client API and
 [host/README.md](host/README.md) for host setup.
+
+## Host packages
+
+The manual `Create release` GitHub Actions workflow reads `VERSION`, builds the
+Windows and Linux hosts, and publishes:
+
+- `moonmic-host-<version>-windows-x86_64.zip`
+- `moonmic-host-<version>-linux-x86_64.tar.gz`
 
 ## License
 

@@ -7,9 +7,6 @@
 [submodule "host/third_party/imgui"]
 	path = host/third_party/imgui
 	url = https://github.com/ocornut/imgui.git
-[submodule "host/third_party/opus"]
-	path = host/third_party/opus
-	url = https://github.com/xiph/opus.git
 [submodule "host/third_party/speexdsp"]
 	path = host/third_party/speexdsp
 	url = https://github.com/xiph/speexdsp.git

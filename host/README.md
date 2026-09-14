@@ -4,6 +4,26 @@
 to a virtual microphone. Windows uses Steam Streaming Microphone or VB-CABLE;
 Linux uses PulseAudio.
 
+## Release packages
+
+Download the package for the host system from GitHub Releases and extract it.
+
+Windows packages contain:
+
+- `moonmic-host.exe`
+- `moonmic-guardian.exe`
+- `moonmic-host.json`
+
+Linux packages contain:
+
+- `moonmic-host`
+- `moonmic-host.json`
+- `moonmic.png`
+- `moonmic-host.desktop`
+
+Run `moonmic-host.exe` on Windows or `./moonmic-host` on Linux. The Linux icon
+must remain next to the executable for the application window to load it.
+
 ## Command-line options
 
 ```text
@@ -46,19 +66,20 @@ cmake -S host -B build/linux -G Ninja \
 cmake --build build/linux --target moonmic-host
 ```
 
-Windows builds cross-compile from Linux using
-`host/third_party/toolchain-mingw.cmake`.
+Windows releases are cross-compiled on Ubuntu with
+`host/third_party/toolchain-mingw.cmake`. The repository's manual release
+workflow contains the complete dependency list and build command.
 
 ## Linux desktop entry
 
 To install the launcher and icon after building:
 
 ```bash
-cmake --install build/linux
+sudo cmake --install build/linux
 ```
 
-Installing the launcher requires administrative rights. The install prefix can
-be changed at configure time with `-DCMAKE_INSTALL_PREFIX=<path>`.
+The install prefix can be changed at configure time with
+`-DCMAKE_INSTALL_PREFIX=<path>`.
 
 ## Drivers
 

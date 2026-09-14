@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Moonmic Host
+Comment=Receive microphone audio from Moonlight clients
+Exec=moonmic-host
+Icon=moonmic
+Terminal=false
+Categories=AudioVideo;Audio;

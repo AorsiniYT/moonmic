@@ -1,0 +1,189 @@
+name: Create release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Read version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Read version
+        id: version
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION must use MAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux
+          - windows
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          packages=(
+            autoconf
+            automake
+            build-essential
+            cmake
+            libtool
+            nasm
+            ninja-build
+            pkg-config
+            yasm
+          )
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            packages+=(
+              libasound2-dev
+              libgl1-mesa-dev
+              libglfw3-dev
+              libopus-dev
+              libpng-dev
+              libpulse-dev
+              libspeexdsp-dev
+              libssl-dev
+              xorg-dev
+            )
+          else
+            packages+=(
+              gcc-mingw-w64-x86-64
+              g++-mingw-w64-x86-64
+              zip
+            )
+          fi
+          sudo apt-get install -y "${packages[@]}"
+
+      - name: Configure Linux build
+        if: matrix.platform == 'linux'
+        run: |
+          cmake -S host -B build/linux -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DHOST_TARGET_LINUX=ON \
+            -DHOST_TARGET_WINDOWS=OFF \
+            -DUSE_IMGUI=ON
+
+      - name: Configure Windows build
+        if: matrix.platform == 'windows'
+        run: |
+          cmake -S host -B build/windows -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/host/third_party/toolchain-mingw.cmake" \
+            -DHOST_TARGET_LINUX=OFF \
+            -DHOST_TARGET_WINDOWS=ON \
+            -DUSE_IMGUI=ON
+
+      - name: Build Linux host
+        if: matrix.platform == 'linux'
+        run: cmake --build build/linux --target moonmic-host --parallel
+
+      - name: Build Windows host
+        if: matrix.platform == 'windows'
+        run: cmake --build build/windows --target moonmic-host moonmic-guardian --parallel
+
+      - name: Package Linux host
+        if: matrix.platform == 'linux'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          package="moonmic-host-$VERSION-linux-x86_64"
+          mkdir -p "package/$package" dist
+          install -m 755 build/linux/moonmic-host "package/$package/"
+          install -m 644 build/linux/moonmic-host.json "package/$package/"
+          install -m 644 build/linux/moonmic.png "package/$package/"
+          install -m 644 host/resources/linux/moonmic-host.desktop "package/$package/"
+          install -m 644 LICENSE "package/$package/"
+          tar -C package -czf "dist/$package.tar.gz" "$package"
+
+      - name: Package Windows host
+        if: matrix.platform == 'windows'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          package="moonmic-host-$VERSION-windows-x86_64"
+          mkdir -p "package/$package" dist
+          install -m 755 build/windows/moonmic-host.exe "package/$package/"
+          install -m 755 build/windows/moonmic-guardian.exe "package/$package/"
+          install -m 644 build/windows/moonmic-host.json "package/$package/"
+          install -m 644 LICENSE "package/$package/"
+          (cd package && zip -r "../dist/$package.zip" "$package")
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: moonmic-${{ matrix.platform }}-${{ needs.prepare.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: moonmic-*-${{ needs.prepare.outputs.version }}
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --title "Moonmic $VERSION"
+          else
+            gh release create "$TAG" dist/* \
+              --generate-notes \
+              --target "$(git rev-parse HEAD)" \
+              --title "Moonmic $VERSION"
+          fi

@@ -2,6 +2,7 @@
 #include "audio_receiver.h"
 #include "../../moonmic_internal.h"
 #include "debug.h"
+#include "typing_focus.h"
 #include <iostream>
 #include <cstring>
 
@@ -10,6 +11,9 @@
 #endif
 
 namespace moonmic {
+
+static_assert(sizeof(moonmic_focus_request_t) == 32);
+static_assert(sizeof(moonmic_focus_response_t) == 20);
 
 AudioReceiver::AudioReceiver()
     : sunshine_(nullptr)
@@ -334,6 +338,37 @@ bool AudioReceiver::isClientAllowed(const std::string& ip) {
 
 void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std::string& sender_ip, uint16_t sender_port, bool is_lagging) {
     std::lock_guard<std::mutex> lock(audio_mutex_);
+
+    uint32_t packet_magic = 0;
+    if (size >= sizeof(packet_magic)) {
+        memcpy(&packet_magic, data, sizeof(packet_magic));
+    }
+    if (packet_magic == MOONMIC_FOCUS_REQUEST_MAGIC && size == sizeof(moonmic_focus_request_t)) {
+        if (!receiver_ || !isClientAllowed(sender_ip)) {
+            return;
+        }
+
+        const auto* request = reinterpret_cast<const moonmic_focus_request_t*>(data);
+        if (request->version != MOONMIC_FOCUS_PROTOCOL_VERSION ||
+            (config_.security.enable_whitelist && request->pair_status != 1)) {
+            return;
+        }
+
+        TypingFocus focus;
+        if (!getTypingFocus(focus)) {
+            return;
+        }
+
+        moonmic_focus_response_t response = {};
+        response.magic = MOONMIC_FOCUS_RESPONSE_MAGIC;
+        response.version = MOONMIC_FOCUS_PROTOCOL_VERSION;
+        response.source = focus.source;
+        response.normalized_x = focus.normalized_x;
+        response.normalized_y = focus.normalized_y;
+        response.request_id = request->request_id;
+        receiver_->sendTo(&response, sizeof(response), sender_ip, sender_port);
+        return;
+    }
     stats_.packets_received++;
     stats_.bytes_received += size;
     stats_.last_sender_ip = sender_ip;

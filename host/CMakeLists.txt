@@ -49,12 +49,14 @@ if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
         src/platform/windows/driver_installer.cpp
         src/platform/windows/audio_utils.cpp
         src/platform/windows/audio_device_manager.cpp
+        src/platform/windows/typing_focus_win.cpp
         src/platform/windows/resources.rc
     )
 elseif(HOST_TARGET_LINUX OR (UNIX AND NOT APPLE AND NOT HOST_TARGET_WINDOWS))
     message(STATUS "moonmic-host: Building for Linux")
     list(APPEND SOURCES
         src/platform/linux/virtual_device_linux.cpp
+        src/platform/linux/typing_focus_linux.cpp
     )
 endif()
 
