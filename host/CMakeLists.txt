@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.15)
-project(moonmic-host VERSION 1.0.0)
+
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION" MOONMIC_VERSION LIMIT_COUNT 1)
+if(NOT MOONMIC_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "VERSION must use MAJOR.MINOR.PATCH")
+endif()
+
+project(moonmic-host VERSION ${MOONMIC_VERSION})
+
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,35 +37,49 @@ set(SOURCES
     src/main.cpp
     src/audio_receiver.cpp
     src/sunshine_webui.cpp
-    src/sunshine_settings_gui.cpp
-    src/display_settings_gui.cpp
     src/single_instance.cpp
     src/display_manager.cpp
     src/version_checker.cpp
-    src/debug_gui.cpp
-    src/guardian_state.cpp
-    src/guardian_launcher.cpp
-    src/gui_helper.cpp
+    src/logger.h
 )
-
-list(APPEND SOURCES src/logger.h)
 
 if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
     message(STATUS "moonmic-host: Building for Windows")
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/drivers" MOONMIC_DRIVER_DIR)
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows/moonmic.ico" MOONMIC_ICON_ICO)
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/moonmic.png" MOONMIC_ICON_PNG)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows/resources.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/resources.rc"
+        @ONLY
+    )
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/windows/guardian.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/guardian.rc"
+        @ONLY
+    )
     list(APPEND SOURCES
         src/platform/windows/virtual_device_win.cpp
         src/platform/windows/driver_installer.cpp
         src/platform/windows/audio_utils.cpp
         src/platform/windows/audio_device_manager.cpp
         src/platform/windows/typing_focus_win.cpp
-        src/platform/windows/resources.rc
+        src/guardian_state.cpp
+        src/guardian_launcher.cpp
+        ${CMAKE_CURRENT_BINARY_DIR}/resources.rc
     )
 elseif(HOST_TARGET_LINUX OR (UNIX AND NOT APPLE AND NOT HOST_TARGET_WINDOWS))
     message(STATUS "moonmic-host: Building for Linux")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/moonmic.png"
+        "${CMAKE_CURRENT_BINARY_DIR}/moonmic.png"
+        COPYONLY
+    )
     list(APPEND SOURCES
         src/platform/linux/virtual_device_linux.cpp
         src/platform/linux/typing_focus_linux.cpp
     )
+    set(MOONMIC_INSTALLED_ICON "${CMAKE_INSTALL_FULL_DATADIR}/pixmaps/moonmic.png")
 endif()
 
 if(USE_IMGUI)
@@ -72,9 +94,13 @@ if(USE_IMGUI)
             ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp
             ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
         )
-        list(APPEND SOURCES ${IMGUI_SOURCES})
-        add_definitions(-DUSE_IMGUI)
-
+        list(APPEND SOURCES
+            ${IMGUI_SOURCES}
+            src/sunshine_settings_gui.cpp
+            src/display_settings_gui.cpp
+            src/debug_gui.cpp
+            src/gui_helper.cpp
+        )
     else()
         message(WARNING "ImGui submodule not found at ${IMGUI_DIR}. Disabling GUI.")
         set(USE_IMGUI OFF)
@@ -82,6 +108,13 @@ if(USE_IMGUI)
 endif()
 
 add_executable(moonmic-host ${SOURCES})
+
+if(USE_IMGUI)
+    target_compile_definitions(moonmic-host PRIVATE USE_IMGUI)
+endif()
+if(MOONMIC_INSTALLED_ICON)
+    target_compile_definitions(moonmic-host PRIVATE MOONMIC_INSTALLED_ICON="${MOONMIC_INSTALLED_ICON}")
+endif()
 
 add_subdirectory(third_party)
 
@@ -96,10 +129,12 @@ if(TARGET speexdsp)
 endif()
 
 target_include_directories(moonmic-host PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/codec
     ${CMAKE_CURRENT_SOURCE_DIR}/src/network
     ${CMAKE_CURRENT_SOURCE_DIR}/src/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
     ${CMAKE_CURRENT_BINARY_DIR}  # For generated version.h
 )
 
@@ -127,10 +162,11 @@ else()
     message(STATUS "Using system CURL")
 endif()
 
-if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
+if(USE_IMGUI AND (HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX)))
     message(STATUS "Building moonmic-guardian watchdog executable")
 
     add_executable(moonmic-guardian
+        ${CMAKE_CURRENT_BINARY_DIR}/guardian.rc
         guardian/main.cpp
         src/guardian_state.cpp
         src/config.cpp
@@ -141,6 +177,7 @@ if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${CMAKE_CURRENT_BINARY_DIR}
     )
+    target_compile_definitions(moonmic-guardian PRIVATE USE_IMGUI)
 
     target_link_libraries(moonmic-guardian PRIVATE
         ole32
@@ -153,14 +190,16 @@ if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
         winmm
     )
 
-    target_link_options(moonmic-guardian PRIVATE
-        -mconsole
-        -static-libgcc
-        -static-libstdc++
-        -static
-    )
+    if(MINGW)
+        target_link_options(moonmic-guardian PRIVATE
+            -mconsole
+            -static-libgcc
+            -static-libstdc++
+            -static
+        )
+    endif()
 
-    if(USE_IMGUI AND IMGUI_SOURCES)
+    if(IMGUI_SOURCES)
         target_sources(moonmic-guardian PRIVATE ${IMGUI_SOURCES})
         target_include_directories(moonmic-guardian PRIVATE
             ${IMGUI_DIR}
@@ -176,28 +215,19 @@ if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
         message(FATAL_ERROR "nlohmann/json not found in ${JSON_DIR}")
     endif()
 
-    if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
-        set(GLFW_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw)
-        if(EXISTS ${GLFW_DIR}/CMakeLists.txt)
-            set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-            set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-            set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-            set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-            if(NOT TARGET glfw)
-                add_subdirectory(${GLFW_DIR} glfw)
-            endif()
-            target_link_libraries(moonmic-guardian PRIVATE glfw)
-        else()
-            message(FATAL_ERROR "GLFW not found in ${GLFW_DIR}")
+    set(GLFW_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw)
+    if(EXISTS ${GLFW_DIR}/CMakeLists.txt)
+        set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
+        if(NOT TARGET glfw)
+            add_subdirectory(${GLFW_DIR} glfw)
         endif()
+        target_link_libraries(moonmic-guardian PRIVATE glfw)
+    else()
+        message(FATAL_ERROR "GLFW not found in ${GLFW_DIR}")
     endif()
-
-    add_custom_command(TARGET moonmic-guardian POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy
-        $<TARGET_FILE:moonmic-guardian>
-        "${CMAKE_CURRENT_BINARY_DIR}/../../../host/windows/"
-        COMMENT "Copying moonmic-guardian.exe to output directory"
-    )
 endif()
 
 if(WIN32)
@@ -222,7 +252,7 @@ else()
     message(FATAL_ERROR "nlohmann/json not found in ${JSON_DIR}")
 endif()
 
-if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
+if(USE_IMGUI AND (HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX)))
     set(GLFW_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glfw)
     if(EXISTS ${GLFW_DIR}/CMakeLists.txt)
         if(NOT TARGET glfw)
@@ -236,6 +266,8 @@ if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
     else()
         message(FATAL_ERROR "GLFW not found in ${GLFW_DIR}")
     endif()
+elseif(USE_IMGUI AND (HOST_TARGET_LINUX OR (UNIX AND NOT APPLE AND NOT HOST_TARGET_WINDOWS)))
+    find_package(glfw3 REQUIRED)
 endif()
 
 message(STATUS "Configuring FFmpeg static build...")
@@ -314,12 +346,14 @@ if(HOST_TARGET_WINDOWS OR (WIN32 AND NOT HOST_TARGET_LINUX))
         oleaut32    # For SysAllocString/SysFreeString (BSTR operations)
     )
 
-    target_link_options(moonmic-host PRIVATE
-        -mconsole
-        -static-libgcc
-        -static-libstdc++
-        -static
-    )
+    if(MINGW)
+        target_link_options(moonmic-host PRIVATE
+            -mconsole
+            -static-libgcc
+            -static-libstdc++
+            -static
+        )
+    endif()
 
     if(USE_IMGUI)
         target_link_libraries(moonmic-host PRIVATE opengl32)
@@ -336,8 +370,13 @@ elseif(HOST_TARGET_LINUX OR (UNIX AND NOT APPLE AND NOT HOST_TARGET_WINDOWS))
     endif()
 endif()
 
-install(TARGETS moonmic-host DESTINATION bin)
-install(FILES config/moonmic-host.json.example DESTINATION etc RENAME moonmic-host.json)
+install(TARGETS moonmic-host DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES config/moonmic-host.json.example DESTINATION ${CMAKE_INSTALL_SYSCONFDIR} RENAME moonmic-host.json)
+
+if(HOST_TARGET_LINUX OR (UNIX AND NOT APPLE AND NOT HOST_TARGET_WINDOWS))
+    install(FILES resources/linux/moonmic-host.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES resources/moonmic.png DESTINATION ${CMAKE_INSTALL_DATADIR}/pixmaps)
+endif()
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/config/moonmic-host.json.example

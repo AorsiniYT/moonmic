@@ -8,8 +8,6 @@
 #include <ks.h>
 #include <ksmedia.h>
 
-DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, 0x00000003, 0x0000, 0x0010, 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
-
 namespace moonmic {
 
 AudioDeviceManager::AudioDeviceManager() {
@@ -27,18 +25,16 @@ bool AudioDeviceManager::initializeCOM() {
         return false;
     }
 
-    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-                          __uuidof(IMMDeviceEnumerator), (void**)&enumerator_);
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                          (void**)&enumerator_);
     if (FAILED(hr)) {
         std::cerr << "[AudioDeviceManager] Failed to create device enumerator" << std::endl;
         return false;
     }
 
-    hr = CoCreateInstance(CLSID_CPolicyConfigClient, NULL, CLSCTX_ALL,
-                          IID_IPolicyConfig, (void**)&policy_config_);
+    hr = CoCreateInstance(CLSID_CPolicyConfigClient, NULL, CLSCTX_ALL, IID_IPolicyConfig, (void**)&policy_config_);
     if (FAILED(hr)) {
         std::cerr << "[AudioDeviceManager] Failed to create IPolicyConfig (Windows 10+ required)" << std::endl;
-
     }
 
     return true;
@@ -196,11 +192,9 @@ bool AudioDeviceManager::setDefaultRecordingDevice(const std::string& device_id)
 
 bool AudioDeviceManager::isVirtualMicrophone(const std::string& device_name) {
 
-    return (device_name.find("Steam") != std::string::npos &&
-            device_name.find("Microphone") != std::string::npos) ||
+    return (device_name.find("Steam") != std::string::npos && device_name.find("Microphone") != std::string::npos) ||
            (device_name.find("CABLE Output") != std::string::npos) ||
-           (device_name.find("VB-Audio") != std::string::npos &&
-            device_name.find("Output") != std::string::npos);
+           (device_name.find("VB-Audio") != std::string::npos && device_name.find("Output") != std::string::npos);
 }
 
 int AudioDeviceManager::getNativeSampleRate(const std::string& device_name, bool is_capture) {
@@ -211,7 +205,8 @@ int AudioDeviceManager::getNativeSampleRate(const std::string& device_name, bool
     return 0;
 }
 
-bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is_capture, NativeAudioFormat& out_format) {
+bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is_capture,
+                                         NativeAudioFormat& out_format) {
     if (!enumerator_) return false;
 
     EDataFlow dataFlow = is_capture ? eCapture : eRender;
@@ -282,9 +277,8 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
                         }
 
                         found = true;
-                        std::cout << "[AudioDeviceManager] Native format for '" << device_name << "': "
-                                  << out_format.sample_rate << "Hz, "
-                                  << out_format.channels << "ch, "
+                        std::cout << "[AudioDeviceManager] Native format for '" << device_name
+                                  << "': " << out_format.sample_rate << "Hz, " << out_format.channels << "ch, "
                                   << out_format.bits_per_sample << "-bit "
                                   << (out_format.is_float ? "(float)" : "(int)") << std::endl;
                     }
@@ -302,4 +296,4 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
     return found;
 }
 
-}
+} // namespace moonmic

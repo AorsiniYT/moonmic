@@ -1,125 +1,115 @@
+#include "heartbeat_monitor.h"
+#include "moonmic_protocol.h"
 
-#include "../heartbeat_monitor.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
-#include <cstring>
+
 #include <cstdlib>
-
-#pragma comment(lib, "ws2_32.lib")
-
-#define PING_MAGIC 0x50494E47
-#define PING_TIMEOUT_MS 3000
-#define CTRL_STOP_MAGIC 0x53544F50
-#define CTRL_START_MAGIC 0x53545254
-
-#pragma pack(push, 1)
-struct ping_packet {
-    uint32_t magic;
-    uint64_t timestamp;
-};
-#pragma pack(pop)
+#include <cstring>
 
 struct heartbeat_monitor_t {
     SOCKET socket;
+    sockaddr_in destination;
     volatile LONG running;
-    volatile moonmic_connection_status_t status;
-    volatile ULONGLONG last_ping_time;
-    HANDLE thread_handle;
+    volatile LONG status;
     volatile LONG paused;
+    volatile LONG current_rtt;
+    volatile ULONGLONG last_packet_time;
+    HANDLE thread_handle;
 };
 
-static ULONGLONG get_time_ms() {
+namespace {
+constexpr ULONGLONG ping_interval_ms = 1000;
+constexpr ULONGLONG ping_timeout_ms = 3000;
+
+ULONGLONG getTimeMs() {
     return GetTickCount64();
 }
 
-static DWORD WINAPI monitor_thread_func(LPVOID param) {
-    heartbeat_monitor_t* monitor = (heartbeat_monitor_t*)param;
+DWORD WINAPI monitorThread(LPVOID parameter) {
+    auto* monitor = static_cast<heartbeat_monitor_t*>(parameter);
     uint8_t buffer[32];
+    ULONGLONG last_sent_ping = 0;
 
     while (InterlockedCompareExchange(&monitor->running, 0, 0)) {
+        const ULONGLONG now = getTimeMs();
+        if (now - last_sent_ping >= ping_interval_ms) {
+            moonmic_ping_packet_t packet = {MOONMIC_PING_MAGIC, now};
+            sendto(monitor->socket, reinterpret_cast<const char*>(&packet), sizeof(packet), 0,
+                   reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
+            last_sent_ping = now;
+        }
 
-        int received = recv(monitor->socket, (char*)buffer, sizeof(buffer), 0);
-
-        if (received >= 4) {
+        const int received = recv(monitor->socket, reinterpret_cast<char*>(buffer), sizeof(buffer), 0);
+        if (received >= static_cast<int>(sizeof(uint32_t))) {
             uint32_t magic;
             memcpy(&magic, buffer, sizeof(magic));
 
-            if (magic == PING_MAGIC && received == sizeof(ping_packet)) {
+            if (received == sizeof(moonmic_ping_packet_t) &&
+                (magic == MOONMIC_PING_MAGIC || magic == MOONMIC_PONG_MAGIC)) {
+                auto* packet = reinterpret_cast<moonmic_ping_packet_t*>(buffer);
+                monitor->last_packet_time = getTimeMs();
+                InterlockedExchange(&monitor->status, MOONMIC_CONNECTED);
 
-                monitor->last_ping_time = get_time_ms();
-                monitor->status = MOONMIC_CONNECTED;
-            }
-            else if (magic == CTRL_STOP_MAGIC && received == 8) {
-
+                if (magic == MOONMIC_PING_MAGIC) {
+                    packet->magic = MOONMIC_PONG_MAGIC;
+                    sendto(monitor->socket, reinterpret_cast<const char*>(packet), sizeof(*packet), 0,
+                           reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
+                } else {
+                    const ULONGLONG elapsed = getTimeMs() - packet->timestamp;
+                    if (elapsed < 5000) {
+                        InterlockedExchange(&monitor->current_rtt, static_cast<LONG>(elapsed));
+                    }
+                }
+            } else if (received == sizeof(moonmic_control_packet_t) && magic == MOONMIC_CTRL_STOP) {
                 InterlockedExchange(&monitor->paused, 1);
-            }
-            else if (magic == CTRL_START_MAGIC && received == 8) {
-
+            } else if (received == sizeof(moonmic_control_packet_t) && magic == MOONMIC_CTRL_START) {
                 InterlockedExchange(&monitor->paused, 0);
             }
         }
 
-        ULONGLONG now = get_time_ms();
-        if (now - monitor->last_ping_time > PING_TIMEOUT_MS) {
-            monitor->status = MOONMIC_DISCONNECTED;
+        if (getTimeMs() - monitor->last_packet_time > ping_timeout_ms) {
+            InterlockedExchange(&monitor->status, MOONMIC_DISCONNECTED);
+            InterlockedExchange(&monitor->current_rtt, -1);
         }
-}
+        Sleep(10);
+    }
 
     return 0;
 }
+} // namespace
 
 extern "C" {
 
-heartbeat_monitor_t* heartbeat_monitor_create(uint16_t port) {
-
-    static bool wsa_initialized = false;
-    if (!wsa_initialized) {
-        WSADATA wsaData;
-        if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-            return nullptr;
-        }
-        wsa_initialized = true;
+heartbeat_monitor_t* heartbeat_monitor_create(intptr_t socket_fd, const char* host_ip, uint16_t host_port) {
+    if (socket_fd == static_cast<intptr_t>(INVALID_SOCKET) || !host_ip) {
+        return nullptr;
     }
 
-    heartbeat_monitor_t* monitor = (heartbeat_monitor_t*)calloc(1, sizeof(heartbeat_monitor_t));
+    auto* monitor = static_cast<heartbeat_monitor_t*>(calloc(1, sizeof(heartbeat_monitor_t)));
     if (!monitor) {
         return nullptr;
     }
 
-    monitor->socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (monitor->socket == INVALID_SOCKET) {
+    monitor->socket = static_cast<SOCKET>(socket_fd);
+    monitor->destination.sin_family = AF_INET;
+    monitor->destination.sin_port = htons(host_port);
+    if (inet_pton(AF_INET, host_ip, &monitor->destination.sin_addr) != 1) {
         free(monitor);
         return nullptr;
     }
 
-    DWORD timeout_ms = 100;
-    setsockopt(monitor->socket, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout_ms, sizeof(timeout_ms));
-
-    sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
-
-    if (bind(monitor->socket, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        closesocket(monitor->socket);
-        free(monitor);
-        return nullptr;
-    }
-
-    monitor->status = MOONMIC_DISCONNECTED;
-    monitor->last_ping_time = 0;
+    monitor->last_packet_time = getTimeMs();
+    InterlockedExchange(&monitor->status, MOONMIC_DISCONNECTED);
+    InterlockedExchange(&monitor->current_rtt, -1);
     InterlockedExchange(&monitor->running, 1);
-    InterlockedExchange(&monitor->paused, 0);
 
-    monitor->thread_handle = CreateThread(nullptr, 0, monitor_thread_func, monitor, 0, nullptr);
+    monitor->thread_handle = CreateThread(nullptr, 0, monitorThread, monitor, 0, nullptr);
     if (!monitor->thread_handle) {
-        closesocket(monitor->socket);
         free(monitor);
         return nullptr;
     }
-
     return monitor;
 }
 
@@ -129,13 +119,10 @@ void heartbeat_monitor_destroy(heartbeat_monitor_t* monitor) {
     }
 
     InterlockedExchange(&monitor->running, 0);
-
     if (monitor->thread_handle) {
         WaitForSingleObject(monitor->thread_handle, INFINITE);
         CloseHandle(monitor->thread_handle);
     }
-
-    closesocket(monitor->socket);
     free(monitor);
 }
 
@@ -143,7 +130,11 @@ moonmic_connection_status_t heartbeat_monitor_get_status(heartbeat_monitor_t* mo
     if (!monitor) {
         return MOONMIC_DISCONNECTED;
     }
-    return monitor->status;
+    return static_cast<moonmic_connection_status_t>(InterlockedCompareExchange(&monitor->status, 0, 0));
+}
+
+int heartbeat_monitor_get_rtt(heartbeat_monitor_t* monitor) {
+    return monitor ? InterlockedCompareExchange(&monitor->current_rtt, 0, 0) : -1;
 }
 
 bool heartbeat_monitor_is_connected(heartbeat_monitor_t* monitor) {
@@ -151,10 +142,6 @@ bool heartbeat_monitor_is_connected(heartbeat_monitor_t* monitor) {
 }
 
 bool heartbeat_monitor_is_paused(heartbeat_monitor_t* monitor) {
-    if (!monitor) {
-        return false;
-    }
-    return InterlockedCompareExchange(&monitor->paused, 0, 0) != 0;
+    return monitor && InterlockedCompareExchange(&monitor->paused, 0, 0) != 0;
 }
-
 }

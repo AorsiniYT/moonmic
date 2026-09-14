@@ -4,18 +4,12 @@
 #include <string>
 #include <atomic>
 #include <thread>
+#include "moonmic_protocol.h"
 
 namespace moonmic {
 
-#pragma pack(push, 1)
-struct MoonmicPing {
-    uint32_t magic;
-    uint64_t timestamp;
-};
-#pragma pack(pop)
-
 class ConnectionMonitor {
-public:
+  public:
     ConnectionMonitor();
     ~ConnectionMonitor();
 
@@ -27,14 +21,14 @@ public:
 
     void sendPacket(const void* data, size_t size);
 
-private:
+  private:
     void pingThreadFunc();
 
     std::atomic<bool> running_;
     std::string client_ip_;
     uint16_t client_port_;
     std::thread ping_thread_;
-    int socket_fd_;
+    intptr_t socket_fd_;
 };
 
-}
+} // namespace moonmic

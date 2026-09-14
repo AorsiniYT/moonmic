@@ -1,5 +1,6 @@
 
-#include "../heartbeat_monitor.h"
+#include "heartbeat_monitor.h"
+#include "moonmic_protocol.h"
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <sys/socket.h>
@@ -12,17 +13,7 @@
 #include <cerrno>
 #include <poll.h>
 
-#define PING_MAGIC 0x50494E47
 #define PING_TIMEOUT_MS 3000
-#define CTRL_STOP_MAGIC 0x53544F50
-#define CTRL_START_MAGIC 0x53545254
-
-#pragma pack(push, 1)
-struct ping_packet {
-    uint32_t magic;
-    uint64_t timestamp;
-};
-#pragma pack(pop)
 
 struct heartbeat_monitor_t {
     int socket;
@@ -53,8 +44,8 @@ static int monitor_thread_func(SceSize args, void* argp) {
         return sceKernelExitDeleteThread(1);
     }
 
-    printf("[heartbeat_mon] Thread started. Socket: %d, Target: %s:%d\n",
-           monitor->socket, inet_ntoa(monitor->dest_addr.sin_addr), ntohs(monitor->dest_addr.sin_port));
+    printf("[heartbeat_mon] Thread started. Socket: %d, Target: %s:%d\n", monitor->socket,
+           inet_ntoa(monitor->dest_addr.sin_addr), ntohs(monitor->dest_addr.sin_port));
 
     uint8_t buffer[32];
 
@@ -62,19 +53,18 @@ static int monitor_thread_func(SceSize args, void* argp) {
     pfd.fd = monitor->socket;
     pfd.events = POLLIN;
 
-    const uint32_t PONG_MAGIC = 0x504F4E47;
     uint64_t last_sent_ping = 0;
 
     while (monitor->running) {
 
         uint64_t now = get_time_ms();
         if (now - last_sent_ping >= 1000) {
-            ping_packet packet;
-            packet.magic = PING_MAGIC;
+            moonmic_ping_packet_t packet;
+            packet.magic = MOONMIC_PING_MAGIC;
             packet.timestamp = now;
 
-            sendto(monitor->socket, &packet, sizeof(packet), 0,
-                  (struct sockaddr*)&monitor->dest_addr, sizeof(monitor->dest_addr));
+            sendto(monitor->socket, &packet, sizeof(packet), 0, (struct sockaddr*)&monitor->dest_addr,
+                   sizeof(monitor->dest_addr));
 
             last_sent_ping = now;
         }
@@ -88,23 +78,22 @@ static int monitor_thread_func(SceSize args, void* argp) {
                 uint32_t magic;
                 memcpy(&magic, buffer, sizeof(magic));
 
-                if (magic == PING_MAGIC && received == sizeof(ping_packet)) {
+                if (magic == MOONMIC_PING_MAGIC && received == sizeof(moonmic_ping_packet_t)) {
 
                     monitor->last_ping_time = get_time_ms();
                     monitor->status = MOONMIC_CONNECTED;
 
-                    ping_packet* pkt = (ping_packet*)buffer;
-                    pkt->magic = PONG_MAGIC;
+                    moonmic_ping_packet_t* pkt = (moonmic_ping_packet_t*)buffer;
+                    pkt->magic = MOONMIC_PONG_MAGIC;
 
-                    sendto(monitor->socket, buffer, received, 0,
-                          (struct sockaddr*)&monitor->dest_addr, sizeof(monitor->dest_addr));
-                }
-                else if (magic == PONG_MAGIC && received == sizeof(ping_packet)) {
+                    sendto(monitor->socket, buffer, received, 0, (struct sockaddr*)&monitor->dest_addr,
+                           sizeof(monitor->dest_addr));
+                } else if (magic == MOONMIC_PONG_MAGIC && received == sizeof(moonmic_ping_packet_t)) {
 
                     monitor->last_ping_time = get_time_ms();
                     monitor->status = MOONMIC_CONNECTED;
 
-                    ping_packet* pkt = (ping_packet*)buffer;
+                    moonmic_ping_packet_t* pkt = (moonmic_ping_packet_t*)buffer;
                     uint64_t ts = pkt->timestamp;
                     uint64_t current_time = get_time_ms();
 
@@ -113,12 +102,10 @@ static int monitor_thread_func(SceSize args, void* argp) {
                     if (diff >= 0 && diff < 5000) {
                         monitor->current_rtt = (int)diff;
                     }
-                }
-                else if (magic == CTRL_STOP_MAGIC) {
+                } else if (magic == MOONMIC_CTRL_STOP) {
                     monitor->paused = 1;
                     printf("[heartbeat_mon] Paused\n");
-                }
-                else if (magic == CTRL_START_MAGIC) {
+                } else if (magic == MOONMIC_CTRL_START) {
                     monitor->paused = 0;
                     printf("[heartbeat_mon] Resumed\n");
                 }
@@ -137,13 +124,13 @@ static int monitor_thread_func(SceSize args, void* argp) {
 
 extern "C" {
 
-heartbeat_monitor_t* heartbeat_monitor_create(int socket_fd, const char* host_ip, uint16_t host_port) {
+heartbeat_monitor_t* heartbeat_monitor_create(intptr_t socket_fd, const char* host_ip, uint16_t host_port) {
     heartbeat_monitor_t* monitor = (heartbeat_monitor_t*)calloc(1, sizeof(heartbeat_monitor_t));
     if (!monitor) {
         return nullptr;
     }
 
-    monitor->socket = socket_fd;
+    monitor->socket = (int)socket_fd;
 
     if (monitor->socket < 0) {
         free(monitor);
@@ -165,11 +152,16 @@ heartbeat_monitor_t* heartbeat_monitor_create(int socket_fd, const char* host_ip
     monitor->running = 1;
     monitor->paused = 0;
 
-    monitor->thread_id = sceKernelCreateThread("heartbeat_mon", monitor_thread_func,
-                                               0x10000100, 0x4000, 0, 0, nullptr);
-    if (monitor->thread_id >= 0) {
+    monitor->thread_id = sceKernelCreateThread("heartbeat_mon", monitor_thread_func, 0x10000100, 0x4000, 0, 0, nullptr);
+    if (monitor->thread_id < 0) {
+        free(monitor);
+        return nullptr;
+    }
 
-        sceKernelStartThread(monitor->thread_id, sizeof(heartbeat_monitor_t*), &monitor);
+    if (sceKernelStartThread(monitor->thread_id, sizeof(heartbeat_monitor_t*), &monitor) < 0) {
+        sceKernelDeleteThread(monitor->thread_id);
+        free(monitor);
+        return nullptr;
     }
 
     return monitor;
@@ -206,5 +198,4 @@ bool heartbeat_monitor_is_connected(heartbeat_monitor_t* monitor) {
 bool heartbeat_monitor_is_paused(heartbeat_monitor_t* monitor) {
     return monitor ? (monitor->paused != 0) : false;
 }
-
 }

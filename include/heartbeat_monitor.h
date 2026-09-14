@@ -8,14 +8,11 @@
 extern "C" {
 #endif
 
-typedef enum {
-    MOONMIC_DISCONNECTED = 0,
-    MOONMIC_CONNECTED = 1
-} moonmic_connection_status_t;
+typedef enum { MOONMIC_DISCONNECTED = 0, MOONMIC_CONNECTED = 1 } moonmic_connection_status_t;
 
 typedef struct heartbeat_monitor_t heartbeat_monitor_t;
 
-heartbeat_monitor_t* heartbeat_monitor_create(int socket_fd, const char* host_ip, uint16_t host_port);
+heartbeat_monitor_t* heartbeat_monitor_create(intptr_t socket_fd, const char* host_ip, uint16_t host_port);
 
 int heartbeat_monitor_get_rtt(heartbeat_monitor_t* monitor);
 

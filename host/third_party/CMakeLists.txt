@@ -1,6 +1,3 @@
-# External Dependencies Static Build Configuration
-# This CMakeLists.txt builds CURL and FFmpeg as static libraries for moonmic-host
-
 cmake_minimum_required(VERSION 3.15)
 
 include(ExternalProject)
@@ -25,9 +22,7 @@ else()
     set(TOOLCHAIN_FILE "")  # Empty for native Linux builds
 endif()
 
-#==================================================================================
-# CURL Static Library Build (HTTP only, no SSL needed for Sunshine Web UI)
-#==================================================================================
+# CURL
 
 # CURL directories
 set(CURL_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/curl)
@@ -119,14 +114,12 @@ else()
     set(CURL_LIB_PATH ${CURL_LIB_PATH} PARENT_SCOPE)
     set(CURL_FOUND TRUE PARENT_SCOPE)
     
-    message(STATUS "CURL will be built statically (HTTP only, no SSL)")
+    message(STATUS "CURL will be built statically with platform TLS")
 endif()
 
 message(STATUS "==========================================")
 
-#==================================================================================
-# FFmpeg Static Library Build
-#==================================================================================
+# FFmpeg
 
 # Determine platform
 if(WIN32)
@@ -258,9 +251,7 @@ set(FFMPEG_LIBRARIES
 message(STATUS "FFmpeg will be built statically")
 message(STATUS "========================================")
 
-#==================================================================================
-# PortAudio Static Library Build
-#==================================================================================
+# PortAudio
 
 message(STATUS "=== PortAudio Static Build Configuration ===")
 set(PA_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/portaudio)
@@ -268,9 +259,7 @@ set(PA_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/portaudio)
 if(NOT EXISTS "${PA_SOURCE_DIR}/CMakeLists.txt")
     message(WARNING "PortAudio source not found at ${PA_SOURCE_DIR}")
 else()
-    # Configure PortAudio options
-    set(PA_BUILD_STATIC ON CACHE BOOL "" FORCE)
-    set(PA_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(PA_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(PA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     set(PA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     

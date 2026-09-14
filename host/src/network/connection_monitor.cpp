@@ -4,24 +4,23 @@
 #include <cstring>
 
 #ifdef _WIN32
-    #include <winsock2.h>
-    #include <ws2tcpip.h>
-    #pragma comment(lib, "ws2_32.lib")
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #else
-    #include <sys/socket.h>
-    #include <netinet/in.h>
-    #include <arpa/inet.h>
-    #include <unistd.h>
-    #define SOCKET int
-    #define INVALID_SOCKET -1
-    #define SOCKET_ERROR -1
-    #define closesocket close
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+#define closesocket close
 #endif
 
 namespace moonmic {
 
 ConnectionMonitor::ConnectionMonitor()
-    : running_(false), client_port_(0), socket_fd_(INVALID_SOCKET) {
+    : running_(false), client_port_(0), socket_fd_(static_cast<intptr_t>(INVALID_SOCKET)) {
 }
 
 ConnectionMonitor::~ConnectionMonitor() {
@@ -38,7 +37,7 @@ void ConnectionMonitor::start(const std::string& client_ip, uint16_t port) {
     client_port_ = port;
 
     socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket_fd_ == INVALID_SOCKET) {
+    if (socket_fd_ == static_cast<intptr_t>(INVALID_SOCKET)) {
         std::cerr << "[ConnectionMonitor] Failed to create socket" << std::endl;
         return;
     }
@@ -60,16 +59,16 @@ void ConnectionMonitor::stop() {
         ping_thread_.join();
     }
 
-    if (socket_fd_ != INVALID_SOCKET) {
+    if (socket_fd_ != static_cast<intptr_t>(INVALID_SOCKET)) {
         closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
+        socket_fd_ = static_cast<intptr_t>(INVALID_SOCKET);
     }
 
     std::cout << "[ConnectionMonitor] Stopped" << std::endl;
 }
 
 void ConnectionMonitor::sendPacket(const void* data, size_t size) {
-    if (!running_ || socket_fd_ == INVALID_SOCKET) {
+    if (!running_ || socket_fd_ == static_cast<intptr_t>(INVALID_SOCKET)) {
         std::cerr << "[ConnectionMonitor] Cannot send packet: not running" << std::endl;
         return;
     }
@@ -80,10 +79,9 @@ void ConnectionMonitor::sendPacket(const void* data, size_t size) {
     dest_addr.sin_port = htons(client_port_);
     inet_pton(AF_INET, client_ip_.c_str(), &dest_addr.sin_addr);
 
-    ssize_t sent = sendto(socket_fd_, (const char*)data, size, 0,
-                          (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+    const auto sent = sendto(socket_fd_, (const char*)data, size, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
-    if (sent != (ssize_t)size) {
+    if (sent < 0 || static_cast<size_t>(sent) != size) {
         std::cerr << "[ConnectionMonitor] Failed to send packet (" << sent << "/" << size << " bytes)" << std::endl;
     }
 }
@@ -96,16 +94,15 @@ void ConnectionMonitor::pingThreadFunc() {
     inet_pton(AF_INET, client_ip_.c_str(), &dest_addr.sin_addr);
 
     while (running_) {
-
-        MoonmicPing ping;
-        ping.magic = 0x50494E47;
+        moonmic_ping_packet_t ping;
+        ping.magic = MOONMIC_PING_MAGIC;
 
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
         ping.timestamp = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
 
-        ssize_t sent = sendto(socket_fd_, (const char*)&ping, sizeof(ping), 0,
-                              (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+        const auto sent =
+            sendto(socket_fd_, (const char*)&ping, sizeof(ping), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
         if (sent != sizeof(ping)) {
             std::cerr << "[ConnectionMonitor] Failed to send ping" << std::endl;
@@ -115,4 +112,4 @@ void ConnectionMonitor::pingThreadFunc() {
     }
 }
 
-}
+} // namespace moonmic

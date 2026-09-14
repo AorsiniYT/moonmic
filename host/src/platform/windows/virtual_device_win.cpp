@@ -17,21 +17,13 @@
 #include "platform/portaudio/virtual_device_pa.h"
 #endif
 
-DEFINE_GUID(KSDATAFORMAT_SUBTYPE_IEEE_FLOAT,
-    0x00000003, 0x0000, 0x0010,
-    0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71);
-
 namespace moonmic {
 
 class VirtualDeviceWindows : public VirtualDevice {
-public:
+  public:
     VirtualDeviceWindows()
-        : audio_client_(nullptr)
-        , render_client_(nullptr)
-        , buffer_frame_count_(0)
-        , system_sample_rate_(0)
-        , system_channels_(0)
-        , convert_to_int16_(false) {
+        : audio_client_(nullptr), render_client_(nullptr), buffer_frame_count_(0), system_sample_rate_(0),
+          system_channels_(0), convert_to_int16_(false) {
 
         HRESULT hr = CoInitialize(NULL);
         if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
@@ -44,7 +36,7 @@ public:
         CoUninitialize();
     }
 
-    bool init(const std::string& device_name, int sample_rate, int channels) override {
+    bool init(const std::string& device_name, int, int) override {
         HRESULT hr;
         IMMDevice* device = nullptr;
 
@@ -53,13 +45,8 @@ public:
             std::cout << "[VirtualDevice] Using default system speakers (debug mode)" << std::endl;
 
             IMMDeviceEnumerator* enumerator = NULL;
-            hr = CoCreateInstance(
-                __uuidof(MMDeviceEnumerator),
-                NULL,
-                CLSCTX_ALL,
-                __uuidof(IMMDeviceEnumerator),
-                (void**)&enumerator
-            );
+            hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                  (void**)&enumerator);
 
             if (FAILED(hr)) {
                 std::cerr << "[VirtualDevice] Failed to create device enumerator" << std::endl;
@@ -81,15 +68,18 @@ public:
 
             if (device_name == "CABLE Output") {
                 playback_device_name = "CABLE Input";
-                std::cout << "[VirtualDevice] Mapped VB-Cable: " << device_name << " -> " << playback_device_name << std::endl;
+                std::cout << "[VirtualDevice] Mapped VB-Cable: " << device_name << " -> " << playback_device_name
+                          << std::endl;
             }
 
             std::cout << "[VirtualDevice] Searching for playback device: " << playback_device_name << std::endl;
 
             device = findDeviceByName(playback_device_name);
             if (!device) {
-                std::cerr << "[VirtualDevice] Failed to find virtual audio device: " << playback_device_name << std::endl;
-                std::cerr << "[VirtualDevice] Make sure the driver is installed and the device name is correct" << std::endl;
+                std::cerr << "[VirtualDevice] Failed to find virtual audio device: " << playback_device_name
+                          << std::endl;
+                std::cerr << "[VirtualDevice] Make sure the driver is installed and the device name is correct"
+                          << std::endl;
                 std::cerr << "[VirtualDevice] Original recording endpoint: " << device_name << std::endl;
                 return false;
             }
@@ -98,12 +88,7 @@ public:
             std::cout << "[VirtualDevice] Virtual microphone endpoint: " << device_name << std::endl;
         }
 
-        hr = device->Activate(
-            __uuidof(IAudioClient),
-            CLSCTX_ALL,
-            NULL,
-            (void**)&audio_client_
-        );
+        hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&audio_client_);
         device->Release();
 
         if (FAILED(hr)) {
@@ -119,7 +104,6 @@ public:
             return false;
         }
 
-        // User confirmed Steam driver requires 32-bit to avoid noise.
         WAVEFORMATEXTENSIBLE target_float = {};
         target_float.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
         target_float.Format.nChannels = 2;
@@ -147,12 +131,12 @@ public:
             std::cerr << "[VirtualDevice] 32-bit Float rejected (hr=0x" << std::hex << hr << ")" << std::endl;
 
             if (hr == S_FALSE && closest_match) {
-                 std::cout << "[VirtualDevice] Using closest match suggested by system" << std::endl;
-                 target_format = closest_match;
-                 using_allocated_format = true;
+                std::cout << "[VirtualDevice] Using closest match suggested by system" << std::endl;
+                target_format = closest_match;
+                using_allocated_format = true;
             } else {
-                 std::cout << "[VirtualDevice] Falling back to system Mix Format" << std::endl;
-                 target_format = mix_format;
+                std::cout << "[VirtualDevice] Falling back to system Mix Format" << std::endl;
+                target_format = mix_format;
             }
         }
 
@@ -165,37 +149,35 @@ public:
         } else if (target_format->wBitsPerSample == 32) {
 
             if (target_format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
-                 convert_to_int16_ = false;
-                 std::cout << "[VirtualDevice] Format is 32-bit IEEE Float. No conversion needed." << std::endl;
+                convert_to_int16_ = false;
+                std::cout << "[VirtualDevice] Format is 32-bit IEEE Float. No conversion needed." << std::endl;
             } else if (target_format->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
-                 WAVEFORMATEXTENSIBLE* ext = (WAVEFORMATEXTENSIBLE*)target_format;
-                 if (IsEqualGUID(ext->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
-                     convert_to_int16_ = false;
-                     std::cout << "[VirtualDevice] Format is 32-bit IEEE Float (Extensible). No conversion needed." << std::endl;
-                 } else {
-                     convert_to_int16_ = false;
-                     std::cout << "[VirtualDevice] Format is 32-bit Extensible (SubFormat unknown). Assuming Float to be safe." << std::endl;
-                 }
+                WAVEFORMATEXTENSIBLE* ext = (WAVEFORMATEXTENSIBLE*)target_format;
+                if (IsEqualGUID(ext->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
+                    convert_to_int16_ = false;
+                    std::cout << "[VirtualDevice] Format is 32-bit IEEE Float (Extensible). No conversion needed."
+                              << std::endl;
+                } else {
+                    convert_to_int16_ = false;
+                    std::cout
+                        << "[VirtualDevice] Format is 32-bit Extensible (SubFormat unknown). Assuming Float to be safe."
+                        << std::endl;
+                }
             } else {
-                 convert_to_int16_ = false;
-                 std::cout << "[VirtualDevice] Format is 32-bit (Tag " << target_format->wFormatTag << "). Assuming Float." << std::endl;
+                convert_to_int16_ = false;
+                std::cout << "[VirtualDevice] Format is 32-bit (Tag " << target_format->wFormatTag
+                          << "). Assuming Float." << std::endl;
             }
         } else {
             convert_to_int16_ = false;
-            std::cout << "[VirtualDevice] WARNING: Unknown bit depth " << target_format->wBitsPerSample << ". Assuming Float." << std::endl;
+            std::cout << "[VirtualDevice] WARNING: Unknown bit depth " << target_format->wBitsPerSample
+                      << ". Assuming Float." << std::endl;
         }
 
-        std::cout << "[VirtualDevice] Target format: " << system_sample_rate_ << "Hz, "
-                  << system_channels_ << "ch" << std::endl;
+        std::cout << "[VirtualDevice] Target format: " << system_sample_rate_ << "Hz, " << system_channels_ << "ch"
+                  << std::endl;
 
-        hr = audio_client_->Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            0,
-            10000000,
-            0,
-            target_format,
-            NULL
-        );
+        hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 10000000, 0, target_format, NULL);
 
         if (using_allocated_format) {
             CoTaskMemFree(target_format);
@@ -203,15 +185,14 @@ public:
         CoTaskMemFree(mix_format);
 
         if (FAILED(hr)) {
-            std::cerr << "[VirtualDevice] Failed to initialize (error: 0x"
-                      << std::hex << hr << ")" << std::endl;
+            std::cerr << "[VirtualDevice] Failed to initialize (error: 0x" << std::hex << hr << ")" << std::endl;
             audio_client_->Release();
             audio_client_ = nullptr;
             return false;
         }
 
-        std::cout << "[VirtualDevice] Successfully initialized @ " << system_sample_rate_ << "Hz, "
-                  << system_channels_ << "ch" << std::endl;
+        std::cout << "[VirtualDevice] Successfully initialized @ " << system_sample_rate_ << "Hz, " << system_channels_
+                  << "ch" << std::endl;
 
         hr = audio_client_->GetBufferSize(&buffer_frame_count_);
         if (FAILED(hr)) {
@@ -220,10 +201,7 @@ public:
             return false;
         }
 
-        hr = audio_client_->GetService(
-            __uuidof(IAudioRenderClient),
-            (void**)&render_client_
-        );
+        hr = audio_client_->GetService(__uuidof(IAudioRenderClient), (void**)&render_client_);
 
         if (FAILED(hr)) {
             audio_client_->Release();
@@ -305,11 +283,13 @@ public:
                     int16_t sample = toInt16(data[f]);
                     int16_buffer[f * system_channels_ + 0] = sample;
                     int16_buffer[f * system_channels_ + 1] = sample;
-                    for (int ch = 2; ch < system_channels_; ch++) int16_buffer[f * system_channels_ + ch] = 0;
+                    for (int ch = 2; ch < system_channels_; ch++)
+                        int16_buffer[f * system_channels_ + ch] = 0;
                 } else {
                     float_buffer[f * system_channels_ + 0] = data[f];
                     float_buffer[f * system_channels_ + 1] = data[f];
-                    for (int ch = 2; ch < system_channels_; ch++) float_buffer[f * system_channels_ + ch] = 0.0f;
+                    for (int ch = 2; ch < system_channels_; ch++)
+                        float_buffer[f * system_channels_ + ch] = 0.0f;
                 }
             }
         } else {
@@ -345,11 +325,9 @@ public:
         }
     }
 
-    int getSampleRate() const override {
-        return system_sample_rate_;
-    }
+    int getSampleRate() const override { return system_sample_rate_; }
 
-private:
+  private:
     IAudioClient* audio_client_;
     IAudioRenderClient* render_client_;
     UINT32 buffer_frame_count_;
@@ -361,13 +339,8 @@ private:
         IMMDeviceEnumerator* enumerator = NULL;
         IMMDeviceCollection* collection = NULL;
 
-        HRESULT hr = CoCreateInstance(
-            __uuidof(MMDeviceEnumerator),
-            NULL,
-            CLSCTX_ALL,
-            __uuidof(IMMDeviceEnumerator),
-            (void**)&enumerator
-        );
+        HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                      (void**)&enumerator);
 
         if (FAILED(hr)) {
             std::cerr << "[VirtualDevice] Failed to create device enumerator" << std::endl;
@@ -447,4 +420,4 @@ std::unique_ptr<VirtualDevice> VirtualDevice::create() {
 #endif
 }
 
-}
+} // namespace moonmic

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "config.h"
+#include "moonmic_protocol.h"
 #include "sunshine_integration.h"
 #include "sunshine_webui.h"
 #include "codec/ffmpeg_decoder.h"
@@ -19,27 +20,8 @@
 
 namespace moonmic {
 
-#pragma pack(push, 1)
-struct MoonmicHandshake {
-    uint32_t magic;
-    uint8_t version;
-    uint8_t pair_status;
-    uint8_t uniqueid_len;
-    char uniqueid[16];
-    uint8_t devicename_len;
-    char devicename[64];
-    uint16_t display_width;
-    uint16_t display_height;
-    uint8_t flags;
-};
-#pragma pack(pop)
-
-struct MoonmicPing;
-
-// NOTE: SunshineWebUI removed - UUID verification not possible because
-
 class AudioReceiver {
-public:
+  public:
     AudioReceiver();
     ~AudioReceiver();
 
@@ -61,7 +43,7 @@ public:
     struct Stats {
         uint64_t packets_received = 0;
         uint64_t packets_dropped = 0;
-        uint64_t packets_dropped_lag = 0; // New: Auto-corrected drops due to lag
+        uint64_t packets_dropped_lag = 0;
         uint64_t bytes_received = 0;
         std::string last_sender_ip;
         std::string client_name;
@@ -73,13 +55,14 @@ public:
 
     Stats getStats();
 
-private:
-    void onPacketReceived(const uint8_t* data, size_t size, const std::string& sender_ip, uint16_t sender_port, bool is_lagging = false);
+  private:
+    void onPacketReceived(const uint8_t* data, size_t size, const std::string& sender_ip, uint16_t sender_port,
+                          bool is_lagging = false);
     bool isClientAllowed(const std::string& ip);
-    bool validateHandshake(const uint8_t* data, size_t size, const std::string& sender_ip, uint16_t& out_w, uint16_t& out_h);
+    bool validateHandshake(const uint8_t* data, size_t size, const std::string& sender_ip, uint16_t& out_w,
+                           uint16_t& out_h);
     void sendControlSignal(uint32_t signal_magic);
     bool applyDisplayResolution(uint16_t width, uint16_t height);
-    bool applyFallbackDisplayResolution(uint16_t width, uint16_t height);
     void resetConnectionState();
 
     void pauseInternal();
@@ -98,6 +81,7 @@ private:
 
     std::atomic<bool> running_;
     std::atomic<bool> paused_;
+    bool stopping_ = false;
     Stats stats_;
 
     bool client_validated_;
@@ -106,8 +90,12 @@ private:
     std::string last_validated_ip_;
 
     uint32_t detected_stream_rate_ = 0;
-    int system_sample_rate_ = 0;
-    bool rate_logged_ = false;
+    uint32_t system_sample_rate_ = 0;
+    uint64_t lag_drop_count_ = 0;
+    uint64_t raw_packet_count_ = 0;
+    uint64_t opus_packet_count_ = 0;
+    uint32_t resampler_packet_count_ = 0;
+    bool steam_attenuation_logged_ = false;
 
     std::chrono::steady_clock::time_point last_packet_time_;
     std::chrono::steady_clock::time_point last_validated_time_;
@@ -120,4 +108,4 @@ private:
     std::mutex audio_mutex_;
 };
 
-}
+} // namespace moonmic
