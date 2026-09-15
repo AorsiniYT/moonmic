@@ -94,15 +94,15 @@ void ConnectionMonitor::pingThreadFunc() {
     inet_pton(AF_INET, client_ip_.c_str(), &dest_addr.sin_addr);
 
     while (running_) {
-        moonmic_ping_packet_t ping;
-        ping.magic = MOONMIC_PING_MAGIC;
+        uint8_t ping[sizeof(moonmic_ping_packet_t)];
 
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
-        ping.timestamp = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+        moonmic_write_ping_le(ping, MOONMIC_PING_MAGIC,
+                              std::chrono::duration_cast<std::chrono::microseconds>(duration).count());
 
         const auto sent =
-            sendto(socket_fd_, (const char*)&ping, sizeof(ping), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
+            sendto(socket_fd_, (const char*)ping, sizeof(ping), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
         if (sent != sizeof(ping)) {
             std::cerr << "[ConnectionMonitor] Failed to send ping" << std::endl;

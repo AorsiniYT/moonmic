@@ -4,20 +4,25 @@
     "bind_address": "0.0.0.0"
   },
   "audio": {
-    "virtual_device_name": "Moonmic Virtual Microphone",
-    "sample_rate": 48000,
+    "resampling_rate": 0,
     "channels": 1,
-    "buffer_size_ms": 20
+    "use_speaker_mode": false,
+    "driver_device_name": "VB-Audio Virtual Cable",
+    "recording_endpoint_name": "CABLE Output",
+    "auto_set_default_mic": true,
+    "original_mic_id": ""
   },
   "security": {
     "enable_whitelist": true,
-    "sync_with_sunshine": true,
-    "sunshine_state_file": "",
+    "ca_path": "",
     "allowed_clients": []
   },
-  "gui": {
-    "show_on_startup": true,
-    "minimize_to_tray": true,
-    "theme": "dark"
+  "sunshine": {
+    "host": "localhost",
+    "webui_port": 47990,
+    "paired": false,
+    "webui_logged_in": false,
+    "webui_username": "",
+    "webui_password_encrypted": ""
   }
 }

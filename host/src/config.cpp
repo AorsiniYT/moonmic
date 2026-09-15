@@ -2,6 +2,7 @@
 #include "config.h"
 #include <fstream>
 #include <iostream>
+#include <utility>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -15,114 +16,142 @@
 
 namespace moonmic {
 
-bool Config::load(const std::string& path) {
-    try {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            std::cerr << "[Config] File not found: " << path << std::endl;
-            return false;
-        }
+static std::string validateConfig(const Config& config) {
+    if (config.server.port < 1 || config.server.port > 65535) return "server.port must be between 1 and 65535";
+    if (config.server.bind_address.empty()) return "server.bind_address cannot be empty";
+    if (config.audio.resampling_rate != 0 &&
+        (config.audio.resampling_rate < 8000 || config.audio.resampling_rate > 192000)) {
+        return "audio.resampling_rate must be 0 or between 8000 and 192000";
+    }
+    if (config.audio.channels < 1 || config.audio.channels > 2) return "audio.channels must be 1 or 2";
+    if (config.sunshine.host.empty()) return "sunshine.host cannot be empty";
+    if (config.sunshine.webui_port < 1 || config.sunshine.webui_port > 65535) {
+        return "sunshine.webui_port must be between 1 and 65535";
+    }
+    return {};
+}
 
+bool Config::load(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::cerr << "[Config] File not found: " << path << std::endl;
+        return false;
+    }
+
+    try {
         nlohmann::json j;
         file >> j;
+        if (!j.is_object()) {
+            std::cerr << "[Config] Root value must be an object" << std::endl;
+            return false;
+        }
+        for (const char* section : {"server", "audio", "security", "sunshine"}) {
+            if (j.contains(section) && !j.at(section).is_object()) {
+                std::cerr << "[Config] " << section << " must be an object" << std::endl;
+                return false;
+            }
+        }
+
+        Config candidate = *this;
 
         if (j.contains("server")) {
-            auto& s = j["server"];
-            if (s.contains("port")) server.port = s["port"];
-            if (s.contains("bind_address")) server.bind_address = s["bind_address"];
+            const auto& s = j.at("server");
+            if (s.contains("port")) candidate.server.port = s.at("port").get<int>();
+            if (s.contains("bind_address")) candidate.server.bind_address = s.at("bind_address").get<std::string>();
         }
 
         if (j.contains("audio")) {
-            auto& a = j["audio"];
-            if (a.contains("stream_sample_rate")) audio.stream_sample_rate = a["stream_sample_rate"];
-            if (a.contains("resampling_rate")) audio.resampling_rate = a["resampling_rate"];
-            if (a.contains("sample_rate")) audio.sample_rate = a["sample_rate"]; // Backward compat
-            if (a.contains("channels")) audio.channels = a["channels"];
-            if (a.contains("buffer_size_ms")) audio.buffer_size_ms = a["buffer_size_ms"];
-            if (a.contains("use_speaker_mode")) audio.use_speaker_mode = a["use_speaker_mode"];
-            if (a.contains("driver_device_name")) audio.driver_device_name = a["driver_device_name"];
-            if (a.contains("recording_endpoint_name")) audio.recording_endpoint_name = a["recording_endpoint_name"];
-
-            if (a.contains("driver_type")) audio.driver_type = a["driver_type"];
-            if (a.contains("auto_set_default_mic")) audio.auto_set_default_mic = a["auto_set_default_mic"];
-            if (a.contains("original_mic_id")) audio.original_mic_id = a["original_mic_id"];
+            const auto& a = j.at("audio");
+            if (a.contains("resampling_rate")) candidate.audio.resampling_rate = a.at("resampling_rate").get<int>();
+            if (a.contains("channels")) candidate.audio.channels = a.at("channels").get<int>();
+            if (a.contains("use_speaker_mode")) candidate.audio.use_speaker_mode = a.at("use_speaker_mode").get<bool>();
+            if (a.contains("driver_device_name")) {
+                candidate.audio.driver_device_name = a.at("driver_device_name").get<std::string>();
+            }
+            if (a.contains("recording_endpoint_name")) {
+                candidate.audio.recording_endpoint_name = a.at("recording_endpoint_name").get<std::string>();
+            }
+            if (a.contains("auto_set_default_mic")) {
+                candidate.audio.auto_set_default_mic = a.at("auto_set_default_mic").get<bool>();
+            }
+            if (a.contains("original_mic_id")) {
+                candidate.audio.original_mic_id = a.at("original_mic_id").get<std::string>();
+            }
         }
 
         if (j.contains("security")) {
-            auto& sec = j["security"];
-            if (sec.contains("enable_whitelist")) security.enable_whitelist = sec["enable_whitelist"];
-            if (sec.contains("sync_with_sunshine")) security.sync_with_sunshine = sec["sync_with_sunshine"];
-            if (sec.contains("sunshine_state_file")) security.sunshine_state_file = sec["sunshine_state_file"];
-            if (sec.contains("allowed_clients") && sec["allowed_clients"].is_array()) {
-                security.allowed_clients.clear();
-                for (const auto& client : sec["allowed_clients"]) {
-                    security.allowed_clients.push_back(client);
-                }
+            const auto& sec = j.at("security");
+            if (sec.contains("enable_whitelist")) {
+                candidate.security.enable_whitelist = sec.at("enable_whitelist").get<bool>();
+            }
+            if (sec.contains("ca_path")) candidate.security.ca_path = sec.at("ca_path").get<std::string>();
+            if (sec.contains("allowed_clients")) {
+                candidate.security.allowed_clients = sec.at("allowed_clients").get<std::vector<std::string>>();
             }
         }
 
         if (j.contains("sunshine")) {
-            auto sun = j["sunshine"];
-            if (sun.contains("host")) sunshine.host = sun["host"];
-            if (sun.contains("port")) sunshine.port = sun["port"];
-            if (sun.contains("webui_port")) sunshine.webui_port = sun["webui_port"];
-            if (sun.contains("paired")) sunshine.paired = sun["paired"];
-            if (sun.contains("webui_logged_in")) sunshine.webui_logged_in = sun["webui_logged_in"];
-            if (sun.contains("webui_username")) sunshine.webui_username = sun["webui_username"];
-            if (sun.contains("webui_password_encrypted"))
-                sunshine.webui_password_encrypted = sun["webui_password_encrypted"];
+            const auto& sun = j.at("sunshine");
+            if (sun.contains("host")) candidate.sunshine.host = sun.at("host").get<std::string>();
+            if (sun.contains("webui_port")) candidate.sunshine.webui_port = sun.at("webui_port").get<int>();
+            if (sun.contains("paired")) candidate.sunshine.paired = sun.at("paired").get<bool>();
+            if (sun.contains("webui_logged_in")) {
+                candidate.sunshine.webui_logged_in = sun.at("webui_logged_in").get<bool>();
+            }
+            if (sun.contains("webui_username")) {
+                candidate.sunshine.webui_username = sun.at("webui_username").get<std::string>();
+            }
+            if (sun.contains("webui_password_encrypted")) {
+                candidate.sunshine.webui_password_encrypted = sun.at("webui_password_encrypted").get<std::string>();
+            }
         }
 
-        if (j.contains("gui")) {
-            auto& g = j["gui"];
-            if (g.contains("show_on_startup")) gui.show_on_startup = g["show_on_startup"];
-            if (g.contains("minimize_to_tray")) gui.minimize_to_tray = g["minimize_to_tray"];
-            if (g.contains("theme")) gui.theme = g["theme"];
+        const std::string error = validateConfig(candidate);
+        if (!error.empty()) {
+            std::cerr << "[Config] Invalid configuration: " << error << std::endl;
+            return false;
         }
 
+        *this = std::move(candidate);
         std::cout << "[Config] Loaded from: " << path << std::endl;
         return true;
-    } catch (const std::exception& e) {
+    } catch (const nlohmann::json::exception& e) {
         std::cerr << "[Config] Error loading: " << e.what() << std::endl;
         return false;
     }
 }
 
 bool Config::save(const std::string& path) {
+    const std::string error = validateConfig(*this);
+    if (!error.empty()) {
+        std::cerr << "[Config] Cannot save invalid configuration: " << error << std::endl;
+        return false;
+    }
+
     try {
         nlohmann::json j;
 
         j["server"]["port"] = server.port;
         j["server"]["bind_address"] = server.bind_address;
 
-        j["audio"]["stream_sample_rate"] = audio.stream_sample_rate;
         j["audio"]["resampling_rate"] = audio.resampling_rate;
-        j["audio"]["sample_rate"] = audio.sample_rate; // Deprecated, for backward compat
         j["audio"]["channels"] = audio.channels;
-        j["audio"]["buffer_size_ms"] = audio.buffer_size_ms;
         j["audio"]["use_speaker_mode"] = audio.use_speaker_mode;
         j["audio"]["driver_device_name"] = audio.driver_device_name;
         j["audio"]["recording_endpoint_name"] = audio.recording_endpoint_name;
-        j["audio"]["driver_type"] = audio.driver_type;
         j["audio"]["auto_set_default_mic"] = audio.auto_set_default_mic;
         j["audio"]["original_mic_id"] = audio.original_mic_id;
 
         j["security"]["enable_whitelist"] = security.enable_whitelist;
-        j["security"]["sync_with_sunshine"] = security.sync_with_sunshine;
-        j["security"]["sunshine_state_file"] = security.sunshine_state_file;
+        j["security"]["ca_path"] = security.ca_path;
         j["security"]["allowed_clients"] = security.allowed_clients;
 
         j["sunshine"]["host"] = sunshine.host;
-        j["sunshine"]["port"] = sunshine.port;
         j["sunshine"]["webui_port"] = sunshine.webui_port;
         j["sunshine"]["paired"] = sunshine.paired;
         j["sunshine"]["webui_logged_in"] = sunshine.webui_logged_in;
         j["sunshine"]["webui_username"] = sunshine.webui_username;
         j["sunshine"]["webui_password_encrypted"] = sunshine.webui_password_encrypted;
-
-        j["gui"]["show_on_startup"] = gui.show_on_startup;
-        j["gui"]["minimize_to_tray"] = gui.minimize_to_tray;
-        j["gui"]["theme"] = gui.theme;
 
         std::ofstream file(path);
         if (!file.is_open()) {
@@ -131,9 +160,13 @@ bool Config::save(const std::string& path) {
         }
 
         file << j.dump(2);
+        if (!file.good()) {
+            std::cerr << "[Config] Failed while writing: " << path << std::endl;
+            return false;
+        }
         std::cout << "[Config] Saved to: " << path << std::endl;
         return true;
-    } catch (const std::exception& e) {
+    } catch (const nlohmann::json::exception& e) {
         std::cerr << "[Config] Error saving: " << e.what() << std::endl;
         return false;
     }

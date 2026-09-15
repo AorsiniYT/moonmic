@@ -21,6 +21,7 @@ if(NOT DEFINED HOST_TARGET_WINDOWS AND NOT DEFINED HOST_TARGET_LINUX)
 endif()
 
 option(USE_IMGUI "Build with Dear ImGui GUI" ON)
+option(MOONMIC_HOST_BUILD_TESTS "Build Moonmic host tests" OFF)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in"
@@ -29,6 +30,7 @@ configure_file(
 )
 
 set(SOURCES
+    src/audio_resampler.cpp
     src/codec/ffmpeg_decoder.cpp
     src/network/udp_receiver.cpp
     src/network/connection_monitor.cpp
@@ -368,6 +370,34 @@ elseif(HOST_TARGET_LINUX OR (UNIX AND NOT APPLE AND NOT HOST_TARGET_WINDOWS))
         find_package(OpenGL REQUIRED)
         target_link_libraries(moonmic-host PRIVATE glfw OpenGL::GL ${CMAKE_DL_LIBS})
     endif()
+endif()
+
+if(MOONMIC_HOST_BUILD_TESTS)
+    enable_testing()
+    add_executable(moonmic-audio-resampler-test
+        tests/audio_resampler_test.cpp
+        src/audio_resampler.cpp
+    )
+    target_include_directories(moonmic-audio-resampler-test PRIVATE src)
+    if(TARGET speexdsp)
+        target_link_libraries(moonmic-audio-resampler-test PRIVATE speexdsp)
+    elseif(SPEEXDSP_FOUND)
+        target_include_directories(moonmic-audio-resampler-test PRIVATE ${SPEEXDSP_INCLUDE_DIRS})
+        target_link_libraries(moonmic-audio-resampler-test PRIVATE ${SPEEXDSP_LIBRARIES})
+    else()
+        message(FATAL_ERROR "SpeexDSP is required for host tests")
+    endif()
+    add_test(NAME audio-resampler-rate-change COMMAND moonmic-audio-resampler-test)
+
+    add_executable(moonmic-config-test
+        tests/config_test.cpp
+        src/config.cpp
+    )
+    target_include_directories(moonmic-config-test PRIVATE src ${JSON_DIR}/include)
+    if(WIN32)
+        target_link_libraries(moonmic-config-test PRIVATE shell32)
+    endif()
+    add_test(NAME config-roundtrip COMMAND moonmic-config-test)
 endif()
 
 install(TARGETS moonmic-host DESTINATION ${CMAKE_INSTALL_BINDIR})

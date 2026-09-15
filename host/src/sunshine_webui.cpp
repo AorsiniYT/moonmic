@@ -1,15 +1,18 @@
-
 #include "sunshine_webui.h"
 #include "config.h"
 #include <curl/curl.h>
 #include <iostream>
-#include <fstream>
 #include <nlohmann/json.hpp>
 
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <exception>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <wincrypt.h>
+#endif
 
 extern bool g_debug_mode;
 
@@ -44,27 +47,78 @@ static std::string base64_encode(const std::string& input) {
     return output;
 }
 
-static std::string xor_encrypt(const std::string& data, const std::string& key) {
-    std::string result = data;
-    for (size_t i = 0; i < data.size(); ++i) {
-        result[i] = data[i] ^ key[i % key.size()];
+#ifdef _WIN32
+
+static const char kStoredPasswordPrefix[] = "v2:";
+
+static std::string base64_decode(const std::string& input) {
+    std::string output;
+    int val = 0;
+    int valb = -8;
+    for (unsigned char c : input) {
+        if (c == '=') break;
+        int score;
+        if (c >= 'A' && c <= 'Z') score = c - 'A';
+        else if (c >= 'a' && c <= 'z') score = c - 'a' + 26;
+        else if (c >= '0' && c <= '9') score = c - '0' + 52;
+        else if (c == '+') score = 62;
+        else if (c == '/') score = 63;
+        else continue;
+        val = (val << 6) + score;
+        valb += 6;
+        if (valb >= 0) {
+            output.push_back((char)((val >> valb) & 0xFF));
+            valb -= 8;
+        }
     }
-    return result;
+    return output;
 }
 
+static std::string protectPassword(const std::string& plain) {
+    DATA_BLOB in{};
+    DATA_BLOB out{};
+    in.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(plain.data()));
+    in.cbData = static_cast<DWORD>(plain.size());
+    if (!CryptProtectData(&in, L"moonmic", NULL, NULL, NULL, 0, &out)) {
+        std::cerr << "[SunshineWebUI] CryptProtectData failed" << std::endl;
+        return "";
+    }
+    std::string blob(reinterpret_cast<char*>(out.pbData), out.cbData);
+    LocalFree(out.pbData);
+    return kStoredPasswordPrefix + base64_encode(blob);
+}
+
+static std::string unprotectPassword(const std::string& stored) {
+    if (stored.compare(0, sizeof(kStoredPasswordPrefix) - 1, kStoredPasswordPrefix) != 0) {
+        return "";
+    }
+    std::string blob = base64_decode(stored.substr(sizeof(kStoredPasswordPrefix) - 1));
+    DATA_BLOB in{};
+    DATA_BLOB out{};
+    in.pbData = reinterpret_cast<BYTE*>(blob.data());
+    in.cbData = static_cast<DWORD>(blob.size());
+    if (!CryptUnprotectData(&in, NULL, NULL, NULL, NULL, 0, &out)) {
+        return "";
+    }
+    std::string plain(reinterpret_cast<char*>(out.pbData), out.cbData);
+    LocalFree(out.pbData);
+    return plain;
+}
+
+#endif
+
 SunshineWebUI::SunshineWebUI(Config& config) : config_(config) {
-    loadCredentials();
-
+#ifndef _WIN32
+    config_.sunshine.webui_logged_in = false;
+    config_.sunshine.webui_password_encrypted.clear();
+#endif
     if (isLoggedIn()) {
-        std::cout << "[SunshineWebUI] Found saved credentials, validating session..." << std::endl;
-
         if (refreshClientList()) {
             config_.sunshine.paired = true;
             std::cout << "[SunshineWebUI] Session validated - auto-login successful" << std::endl;
         } else {
-
             config_.sunshine.paired = false;
-            std::cout << "[SunshineWebUI] Session expired - please login again" << std::endl;
+            std::cout << "[SunshineWebUI] Session expired, login again" << std::endl;
         }
     }
 }
@@ -74,7 +128,15 @@ std::string SunshineWebUI::generateAuthHeader() const {
         return "";
     }
 
-    std::string password = xor_encrypt(config_.sunshine.webui_password_encrypted, "moonmic_sunshine_key");
+    std::string password = session_password_;
+#ifdef _WIN32
+    if (password.empty()) {
+        password = unprotectPassword(config_.sunshine.webui_password_encrypted);
+    }
+#endif
+    if (password.empty()) {
+        return "";
+    }
 
     std::string credentials = config_.sunshine.webui_username + ":" + password;
 
@@ -125,8 +187,11 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     headers = curl_slist_append(headers, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    if (!config_.security.ca_path.empty()) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, config_.security.ca_path.c_str());
+    }
 
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
 
@@ -189,10 +254,21 @@ bool SunshineWebUI::login(const std::string& username, const std::string& passwo
 
     std::string old_username = config_.sunshine.webui_username;
     std::string old_password = config_.sunshine.webui_password_encrypted;
+    std::string old_session_password = session_password_;
     bool old_logged_in = config_.sunshine.webui_logged_in;
 
     config_.sunshine.webui_username = username;
-    config_.sunshine.webui_password_encrypted = xor_encrypt(password, "moonmic_sunshine_key");
+    session_password_ = password;
+#ifdef _WIN32
+    config_.sunshine.webui_password_encrypted = protectPassword(password);
+    if (config_.sunshine.webui_password_encrypted.empty()) {
+        config_.sunshine.webui_username = old_username;
+        session_password_ = old_session_password;
+        return false;
+    }
+#else
+    config_.sunshine.webui_password_encrypted.clear();
+#endif
     config_.sunshine.webui_logged_in = true;
 
     std::string response = makeAuthenticatedRequest("/api/clients/list");
@@ -201,6 +277,7 @@ bool SunshineWebUI::login(const std::string& username, const std::string& passwo
 
         config_.sunshine.webui_username = old_username;
         config_.sunshine.webui_password_encrypted = old_password;
+        session_password_ = old_session_password;
         config_.sunshine.webui_logged_in = old_logged_in;
 
         std::cerr << "[SunshineWebUI] Login failed - invalid credentials" << std::endl;
@@ -240,6 +317,7 @@ bool SunshineWebUI::isLoggedIn() const {
 void SunshineWebUI::logout() {
     config_.sunshine.webui_username = "";
     config_.sunshine.webui_password_encrypted = "";
+    session_password_.clear();
     config_.sunshine.webui_logged_in = false;
     config_.sunshine.paired = false;
     paired_clients_.clear();
@@ -300,13 +378,6 @@ void SunshineWebUI::saveCredentials() {
     config_.save(Config::getDefaultConfigPath());
 
     std::cout << "[SunshineWebUI] Credentials saved" << std::endl;
-}
-
-void SunshineWebUI::loadCredentials() {
-
-    if (isLoggedIn()) {
-        std::cout << "[SunshineWebUI] Loaded credentials for: " << config_.sunshine.webui_username << std::endl;
-    }
 }
 
 bool SunshineWebUI::setDisplayResolution(uint16_t target_width, uint16_t target_height) {
@@ -386,7 +457,6 @@ bool SunshineWebUI::setDisplayResolution(uint16_t target_width, uint16_t target_
 
     std::cout << "[SunshineWebUI] Config save response: " << response << std::endl;
     std::cout << "[SunshineWebUI] Display resolution configured: 960x544 -> " << target_res << std::endl;
-    return true;
     return true;
 }
 

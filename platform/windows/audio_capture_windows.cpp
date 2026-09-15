@@ -27,7 +27,7 @@ static bool windows_audio_init(audio_capture_t* self, uint32_t sample_rate, uint
 
     CoInitializeEx(NULL, COINIT_MULTITHREADED);
 
-    hr = CoCreateInstance(CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, IID_IMMDeviceEnumerator,
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                           (void**)&data->device_enum);
 
     if (FAILED(hr)) {
@@ -43,7 +43,7 @@ static bool windows_audio_init(audio_capture_t* self, uint32_t sample_rate, uint
         return false;
     }
 
-    hr = data->device->Activate(IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&data->audio_client);
+    hr = data->device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&data->audio_client);
 
     if (FAILED(hr)) {
         data->device->Release();
@@ -118,7 +118,7 @@ static bool windows_audio_init(audio_capture_t* self, uint32_t sample_rate, uint
         return false;
     }
 
-    hr = data->audio_client->GetService(IID_IAudioCaptureClient, (void**)&data->capture_client);
+    hr = data->audio_client->GetService(__uuidof(IAudioCaptureClient), (void**)&data->capture_client);
 
     if (FAILED(hr)) {
         CloseHandle(data->audio_event);

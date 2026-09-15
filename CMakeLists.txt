@@ -106,6 +106,12 @@ target_link_libraries(moonmic PUBLIC
     ${MOONMIC_PLATFORM_LIBRARIES}
 )
 
+if(MOONMIC_BUILD_TESTS)
+    add_executable(moonmic-api-link-test tests/api_link_test.c)
+    target_link_libraries(moonmic-api-link-test PRIVATE moonmic::moonmic)
+    add_test(NAME api-link COMMAND moonmic-api-link-test)
+endif()
+
 install(TARGETS moonmic
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib

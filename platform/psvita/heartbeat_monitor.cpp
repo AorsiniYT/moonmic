@@ -59,11 +59,10 @@ static int monitor_thread_func(SceSize args, void* argp) {
 
         uint64_t now = get_time_ms();
         if (now - last_sent_ping >= 1000) {
-            moonmic_ping_packet_t packet;
-            packet.magic = MOONMIC_PING_MAGIC;
-            packet.timestamp = now;
+            uint8_t packet[sizeof(moonmic_ping_packet_t)];
+            moonmic_write_ping_le(packet, MOONMIC_PING_MAGIC, now);
 
-            sendto(monitor->socket, &packet, sizeof(packet), 0, (struct sockaddr*)&monitor->dest_addr,
+            sendto(monitor->socket, packet, sizeof(packet), 0, (struct sockaddr*)&monitor->dest_addr,
                    sizeof(monitor->dest_addr));
 
             last_sent_ping = now;
@@ -75,26 +74,24 @@ static int monitor_thread_func(SceSize args, void* argp) {
             ssize_t received = recv(monitor->socket, buffer, sizeof(buffer), 0);
 
             if (received >= 4) {
-                uint32_t magic;
-                memcpy(&magic, buffer, sizeof(magic));
+                const uint32_t magic = moonmic_read_u32_le(buffer);
 
                 if (magic == MOONMIC_PING_MAGIC && received == sizeof(moonmic_ping_packet_t)) {
 
                     monitor->last_ping_time = get_time_ms();
                     monitor->status = MOONMIC_CONNECTED;
 
-                    moonmic_ping_packet_t* pkt = (moonmic_ping_packet_t*)buffer;
-                    pkt->magic = MOONMIC_PONG_MAGIC;
+                    uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                    moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(buffer));
 
-                    sendto(monitor->socket, buffer, received, 0, (struct sockaddr*)&monitor->dest_addr,
+                    sendto(monitor->socket, pong, sizeof(pong), 0, (struct sockaddr*)&monitor->dest_addr,
                            sizeof(monitor->dest_addr));
                 } else if (magic == MOONMIC_PONG_MAGIC && received == sizeof(moonmic_ping_packet_t)) {
 
                     monitor->last_ping_time = get_time_ms();
                     monitor->status = MOONMIC_CONNECTED;
 
-                    moonmic_ping_packet_t* pkt = (moonmic_ping_packet_t*)buffer;
-                    uint64_t ts = pkt->timestamp;
+                    uint64_t ts = moonmic_read_ping_timestamp_le(buffer);
                     uint64_t current_time = get_time_ms();
 
                     int64_t diff = (int64_t)(current_time - ts);

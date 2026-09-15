@@ -40,29 +40,29 @@ static void* monitorThread(void* parameter) {
     while (__sync_fetch_and_add(&monitor->running, 0)) {
         const uint64_t now = getTimeMs();
         if (now - last_sent_ping >= ping_interval_ms) {
-            moonmic_ping_packet_t packet = {MOONMIC_PING_MAGIC, now};
-            sendto(monitor->socket, &packet, sizeof(packet), 0,
+            uint8_t packet[sizeof(moonmic_ping_packet_t)];
+            moonmic_write_ping_le(packet, MOONMIC_PING_MAGIC, now);
+            sendto(monitor->socket, packet, sizeof(packet), 0,
                    reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
             last_sent_ping = now;
         }
 
         const ssize_t received = recv(monitor->socket, buffer, sizeof(buffer), 0);
         if (received >= static_cast<ssize_t>(sizeof(uint32_t))) {
-            uint32_t magic;
-            memcpy(&magic, buffer, sizeof(magic));
+            const uint32_t magic = moonmic_read_u32_le(buffer);
 
             if (received == sizeof(moonmic_ping_packet_t) &&
                 (magic == MOONMIC_PING_MAGIC || magic == MOONMIC_PONG_MAGIC)) {
-                auto* packet = reinterpret_cast<moonmic_ping_packet_t*>(buffer);
                 monitor->last_packet_time = getTimeMs();
                 __sync_lock_test_and_set(&monitor->status, MOONMIC_CONNECTED);
 
                 if (magic == MOONMIC_PING_MAGIC) {
-                    packet->magic = MOONMIC_PONG_MAGIC;
-                    sendto(monitor->socket, packet, sizeof(*packet), 0,
+                    uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                    moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(buffer));
+                    sendto(monitor->socket, pong, sizeof(pong), 0,
                            reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
                 } else {
-                    const uint64_t elapsed = getTimeMs() - packet->timestamp;
+                    const uint64_t elapsed = getTimeMs() - moonmic_read_ping_timestamp_le(buffer);
                     if (elapsed < 5000) {
                         __sync_lock_test_and_set(&monitor->current_rtt, static_cast<int>(elapsed));
                     }

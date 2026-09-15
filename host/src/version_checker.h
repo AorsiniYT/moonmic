@@ -2,7 +2,6 @@
 #pragma once
 
 #include <string>
-#include <functional>
 
 namespace moonmic {
 
@@ -15,17 +14,14 @@ class VersionChecker {
         std::string download_url;
     };
 
-    VersionChecker();
-    ~VersionChecker();
-
-    void checkForUpdates(std::function<void(const VersionInfo&)> callback);
+    static VersionInfo checkForUpdates();
 
     static std::string getCurrentVersion();
 
     static int compareVersions(const std::string& v1, const std::string& v2);
 
   private:
-    std::string fetchLatestVersion();
+    static bool fetchLatestRelease(std::string& version, std::string& download_url);
 };
 
 } // namespace moonmic

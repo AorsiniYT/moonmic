@@ -1,110 +1,111 @@
 
 #include "version_checker.h"
 #include "version.h"
-#include <cstdlib>
-#include <fstream>
+#include <curl/curl.h>
+#include <nlohmann/json.hpp>
+#include <array>
+#include <optional>
 #include <sstream>
 #include <iostream>
-#include <thread>
-
-#ifdef _WIN32
-#include <windows.h>
-#endif
 
 namespace moonmic {
 
-static const char* VERSION_URL = "https://raw.githubusercontent.com/AorsiniYT/moonmic/main/VERSION";
+static const char* LATEST_RELEASE_URL = "https://api.github.com/repos/AorsiniYT/moonmic/releases/latest";
 static const char* RELEASES_URL = "https://github.com/AorsiniYT/moonmic/releases";
-
-VersionChecker::VersionChecker() {
-}
-
-VersionChecker::~VersionChecker() {
-}
 
 std::string VersionChecker::getCurrentVersion() {
     return MOONMIC_VERSION;
 }
 
+static std::optional<std::array<int, 3>> parseVersion(const std::string& version) {
+    std::istringstream stream(version);
+    std::array<int, 3> parts{};
+    char first_dot = 0;
+    char second_dot = 0;
+    char trailing = 0;
+    if (!(stream >> parts[0] >> first_dot >> parts[1] >> second_dot >> parts[2]) || first_dot != '.' ||
+        second_dot != '.' || (stream >> trailing) || parts[0] < 0 || parts[1] < 0 || parts[2] < 0) {
+        return std::nullopt;
+    }
+    return parts;
+}
+
 int VersionChecker::compareVersions(const std::string& v1, const std::string& v2) {
-    std::istringstream ss1(v1), ss2(v2);
-    int major1 = 0, minor1 = 0, patch1 = 0;
-    int major2 = 0, minor2 = 0, patch2 = 0;
-    char dot;
+    const auto first = parseVersion(v1);
+    const auto second = parseVersion(v2);
+    if (!first || !second) return 0;
 
-    ss1 >> major1 >> dot >> minor1 >> dot >> patch1;
-    ss2 >> major2 >> dot >> minor2 >> dot >> patch2;
-
-    if (major1 != major2) return (major1 > major2) ? 1 : -1;
-    if (minor1 != minor2) return (minor1 > minor2) ? 1 : -1;
-    if (patch1 != patch2) return (patch1 > patch2) ? 1 : -1;
+    if ((*first)[0] != (*second)[0]) return ((*first)[0] > (*second)[0]) ? 1 : -1;
+    if ((*first)[1] != (*second)[1]) return ((*first)[1] > (*second)[1]) ? 1 : -1;
+    if ((*first)[2] != (*second)[2]) return ((*first)[2] > (*second)[2]) ? 1 : -1;
     return 0;
 }
 
-std::string VersionChecker::fetchLatestVersion() {
+bool VersionChecker::fetchLatestRelease(std::string& version, std::string& download_url) {
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::cerr << "[VersionChecker] Failed to initialize curl" << std::endl;
+        return false;
+    }
+
     std::string result;
 
-#ifdef _WIN32
+    curl_easy_setopt(curl, CURLOPT_URL, LATEST_RELEASE_URL);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "Moonmic version checker");
+    curl_easy_setopt(
+        curl, CURLOPT_WRITEFUNCTION, +[](char* ptr, size_t size, size_t nmemb, void* userdata) -> size_t {
+            static_cast<std::string*>(userdata)->append(ptr, size * nmemb);
+            return size * nmemb;
+        });
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result);
 
-    char temp_file[MAX_PATH];
-    GetTempPathA(MAX_PATH, temp_file);
-    strcat_s(temp_file, "moonmic_version.txt");
+    const CURLcode res = curl_easy_perform(curl);
+    long response_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+    curl_easy_cleanup(curl);
 
-    std::string cmd = "powershell -Command \"(New-Object Net.WebClient).DownloadFile('" + std::string(VERSION_URL) +
-                      "', '" + std::string(temp_file) + "')\" >nul 2>&1";
-
-    if (system(cmd.c_str()) == 0) {
-        std::ifstream file(temp_file);
-        if (file.is_open()) {
-            std::getline(file, result);
-            file.close();
-        }
-        DeleteFileA(temp_file);
+    if (res != CURLE_OK) {
+        std::cerr << "[VersionChecker] Version fetch failed: " << curl_easy_strerror(res) << std::endl;
+        return false;
     }
-#else
-
-    const char* temp_file = "/tmp/moonmic_version.txt";
-    std::string cmd = std::string("curl -s -o ") + temp_file + " " + VERSION_URL + " 2>/dev/null";
-
-    if (system(cmd.c_str()) == 0) {
-        std::ifstream file(temp_file);
-        if (file.is_open()) {
-            std::getline(file, result);
-            file.close();
-        }
-        remove(temp_file);
-    }
-#endif
-
-    if (!result.empty()) {
-        size_t start = result.find_first_not_of(" \t\n\r");
-        size_t end = result.find_last_not_of(" \t\n\r");
-        if (start != std::string::npos && end != std::string::npos) {
-            result = result.substr(start, end - start + 1);
-        }
+    if (response_code != 200) {
+        std::cerr << "[VersionChecker] Release request returned HTTP " << response_code << std::endl;
+        return false;
     }
 
-    return result;
+    const auto release = nlohmann::json::parse(result, nullptr, false);
+    if (release.is_discarded() || !release.contains("tag_name") || !release["tag_name"].is_string()) {
+        std::cerr << "[VersionChecker] Release response did not contain a valid tag" << std::endl;
+        return false;
+    }
+
+    version = release["tag_name"].get<std::string>();
+    if (!version.empty() && (version.front() == 'v' || version.front() == 'V')) {
+        version.erase(version.begin());
+    }
+    if (!parseVersion(version)) {
+        std::cerr << "[VersionChecker] Release tag is not a semantic version: " << version << std::endl;
+        return false;
+    }
+
+    if (release.contains("html_url") && release["html_url"].is_string()) {
+        download_url = release["html_url"].get<std::string>();
+    } else {
+        download_url = RELEASES_URL;
+    }
+    return true;
 }
 
-void VersionChecker::checkForUpdates(std::function<void(const VersionInfo&)> callback) {
-
-    std::thread([this, callback]() {
-        VersionInfo info;
-        info.current_version = getCurrentVersion();
-        info.latest_version = fetchLatestVersion();
-        info.download_url = RELEASES_URL;
-
-        if (info.latest_version.empty()) {
-
-            info.update_available = false;
-        } else {
-            int cmp = compareVersions(info.latest_version, info.current_version);
-            info.update_available = (cmp > 0);
-        }
-
-        callback(info);
-    }).detach();
+VersionChecker::VersionInfo VersionChecker::checkForUpdates() {
+    VersionInfo info{};
+    info.current_version = getCurrentVersion();
+    info.download_url = RELEASES_URL;
+    if (fetchLatestRelease(info.latest_version, info.download_url)) {
+        info.update_available = compareVersions(info.latest_version, info.current_version) > 0;
+    }
+    return info;
 }
 
 } // namespace moonmic

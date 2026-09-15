@@ -33,9 +33,6 @@ typedef struct {
 
     const char* uniqueid;
     const char* devicename;
-    int sunshine_https_port;
-    const char* cert_path;
-    const char* key_path;
     int pair_status;
 
     uint16_t target_display_width;
@@ -71,7 +68,7 @@ moonmic_connection_status_t moonmic_get_connection_status(moonmic_client_t* clie
 
 bool moonmic_is_connected(moonmic_client_t* client);
 
-const char* moonmic_get_version();
+const char* moonmic_get_version(void);
 
 int moonmic_client_get_rtt(moonmic_client_t* client);
 

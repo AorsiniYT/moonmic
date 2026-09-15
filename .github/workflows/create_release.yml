@@ -127,7 +127,7 @@ jobs:
           install -m 644 build/linux/moonmic-host.json "package/$package/"
           install -m 644 build/linux/moonmic.png "package/$package/"
           install -m 644 host/resources/linux/moonmic-host.desktop "package/$package/"
-          install -m 644 LICENSE "package/$package/"
+          install -m 644 LICENSE THIRD_PARTY_NOTICES.md "package/$package/"
           tar -C package -czf "dist/$package.tar.gz" "$package"
 
       - name: Package Windows host
@@ -141,7 +141,7 @@ jobs:
           install -m 755 build/windows/moonmic-host.exe "package/$package/"
           install -m 755 build/windows/moonmic-guardian.exe "package/$package/"
           install -m 644 build/windows/moonmic-host.json "package/$package/"
-          install -m 644 LICENSE "package/$package/"
+          install -m 644 LICENSE THIRD_PARTY_NOTICES.md "package/$package/"
           (cd package && zip -r "../dist/$package.zip" "$package")
 
       - name: Upload package

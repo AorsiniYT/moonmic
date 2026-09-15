@@ -36,8 +36,6 @@ struct moonmic_client_t {
 
     void* thread_handle;
 
-    bool handshake_sent;
-
     char uniqueid_storage[32];
     char devicename_storage[128];
 
@@ -64,13 +62,6 @@ struct moonmic_opus_encoder_t {
     uint32_t bitrate;
 };
 
-struct udp_sender_t {
-    intptr_t socket_fd;
-    char host_ip[64];
-    uint16_t port;
-    uint32_t sequence;
-};
-
 #ifdef __vita__
 audio_capture_t* audio_capture_create_vita(void);
 #elif _WIN32
@@ -91,6 +82,8 @@ int moonmic_opus_encoder_encode(moonmic_opus_encoder_t* encoder, const float* pc
 udp_sender_t* udp_sender_create(const char* host_ip, uint16_t port);
 void udp_sender_destroy(udp_sender_t* sender);
 bool udp_sender_send(udp_sender_t* sender, const void* data, size_t size);
+uint32_t udp_sender_next_sequence(udp_sender_t* sender);
+intptr_t udp_sender_socket(const udp_sender_t* sender);
 
 uint64_t moonmic_get_timestamp_us(void);
 void* moonmic_thread_create(void* (*func)(void*), void* arg);

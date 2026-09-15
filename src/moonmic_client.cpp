@@ -63,7 +63,10 @@ static void* moonmic_worker_thread(void* arg) {
         memcpy(handshake.devicename, client->config.devicename, handshake.devicename_len);
     }
 
-    if (udp_sender_send(client->sender, &handshake, sizeof(handshake))) {
+    uint8_t handshake_wire[sizeof(moonmic_handshake_t)];
+    moonmic_write_handshake_le(handshake_wire, &handshake);
+
+    if (udp_sender_send(client->sender, handshake_wire, sizeof(handshake_wire))) {
         MOONMIC_LOG("[moonmic_worker] Handshake sent: device='%s', uniqueid_len=%d, resolution=%dx%d",
                     client->config.devicename ? client->config.devicename : "unknown", handshake.uniqueid_len,
                     handshake.display_width, handshake.display_height);
@@ -124,7 +127,7 @@ static void* moonmic_worker_thread(void* arg) {
                 if (now - last_probe_time >= PROBE_INTERVAL_MS) {
                     probe_count++;
 
-                    udp_sender_send(client->sender, &handshake, sizeof(handshake));
+                    udp_sender_send(client->sender, handshake_wire, sizeof(handshake_wire));
                     MOONMIC_LOG("[moonmic_worker] Probe #%d: waiting for host...", probe_count);
                     last_probe_time = now;
                 }
@@ -140,7 +143,7 @@ static void* moonmic_worker_thread(void* arg) {
             if (is_connected && !was_connected) {
 
                 MOONMIC_LOG("[moonmic_worker] Host is back online! Resuming transmission...");
-                if (udp_sender_send(client->sender, &handshake, sizeof(handshake))) {
+                if (udp_sender_send(client->sender, handshake_wire, sizeof(handshake_wire))) {
                     MOONMIC_LOG("[moonmic_worker] Handshake sent - resuming audio");
                 }
                 was_connected = true;
@@ -195,7 +198,7 @@ static void* moonmic_worker_thread(void* arg) {
             }
             size_t encoded_bytes = sample_count * sizeof(int16_t);
             uint32_t packet_sample_rate = client->config.sample_rate | MOONMIC_RAW_FLAG;
-            uint32_t seq = client->sender->sequence++;
+            uint32_t seq = udp_sender_next_sequence(client->sender);
             uint64_t ts = moonmic_get_timestamp_us();
             moonmic_write_packet_header(opus_buffer, seq, ts, packet_sample_rate);
 
@@ -249,7 +252,7 @@ static void* moonmic_worker_thread(void* arg) {
             }
 
             uint32_t packet_sample_rate = client->config.sample_rate;
-            uint32_t seq = client->sender->sequence++;
+            uint32_t seq = udp_sender_next_sequence(client->sender);
             uint64_t ts = moonmic_get_timestamp_us();
             moonmic_write_packet_header(opus_buffer, seq, ts, packet_sample_rate);
 
@@ -305,8 +308,6 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
     MOONMIC_LOG("[moonmic_create] Copied strings: uniqueid='%s', devicename='%s'",
                 client->config.uniqueid ? client->config.uniqueid : "(null)",
                 client->config.devicename ? client->config.devicename : "(null)");
-
-    client->handshake_sent = false;
 
     client->accumulation_buffer = NULL;
     client->accumulated_samples = 0;
@@ -404,12 +405,11 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
     }
 
     // Heartbeats share the sender socket so replies return to the bound source port.
-    client->heartbeat_monitor =
-        heartbeat_monitor_create(client->sender->socket_fd, client->config.host_ip, client->config.port);
+    const intptr_t sender_socket = udp_sender_socket(client->sender);
+    client->heartbeat_monitor = heartbeat_monitor_create(sender_socket, client->config.host_ip, client->config.port);
 
     if (client->heartbeat_monitor) {
-        MOONMIC_LOG("[moonmic_create] Heartbeat monitor started on shared socket %lld",
-                    (long long)client->sender->socket_fd);
+        MOONMIC_LOG("[moonmic_create] Heartbeat monitor started on shared socket %lld", (long long)sender_socket);
     } else {
         MOONMIC_LOG("[moonmic_create] Failed to create heartbeat monitor");
         moonmic_destroy(client);
@@ -529,7 +529,7 @@ void moonmic_set_status_callback(moonmic_client_t* client, moonmic_status_callba
     }
 }
 
-const char* moonmic_version(void) {
+const char* moonmic_get_version(void) {
     return MOONMIC_VERSION;
 }
 

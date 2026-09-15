@@ -2,6 +2,7 @@
 #pragma once
 
 #include "config.h"
+#include "audio_resampler.h"
 #include "moonmic_protocol.h"
 #include "sunshine_integration.h"
 #include "sunshine_webui.h"
@@ -10,7 +11,6 @@
 #include "network/connection_monitor.h"
 #include "platform/virtual_device.h"
 #include "display_manager.h"
-#include <speex/speex_resampler.h>
 #include <memory>
 #include <string>
 #include <atomic>
@@ -74,7 +74,7 @@ class AudioReceiver {
     SunshineWebUI* sunshine_webui_ = nullptr;
     DisplayManager* display_manager_ = nullptr; // Optional direct display control fallback
     std::unique_ptr<FFmpegDecoder> decoder_;
-    SpeexResamplerState* resampler_;
+    AudioResampler resampler_;
     std::unique_ptr<UDPReceiver> receiver_;
     std::unique_ptr<VirtualDevice> virtual_device_;
     std::unique_ptr<ConnectionMonitor> connection_monitor_;

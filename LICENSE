@@ -19,23 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----
-
-## Third-Party Components
-
-### VB-CABLE Driver (Windows)
-The VB-CABLE driver included in `host/driver/` is:
-- Copyright © 2010-2024 Vincent Burel / VB-Audio Software
-- Licensed as donationware (free for end users)
-- Redistribution allowed (unmodified package)
-- Official website: https://vb-audio.com/Cable/
-- Donations welcome at: https://vb-audio.com/Services/licensing.htm
-
-### Dear ImGui (if included)
-Dear ImGui is licensed under the MIT License.
-Copyright (c) 2014-2024 Omar Cornut
-
-### Opus Audio Codec
-Opus is licensed under the BSD 3-Clause License.
-Copyright (c) 2001-2011 Xiph.Org Foundation

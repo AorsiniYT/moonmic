@@ -45,8 +45,7 @@
 
 using namespace moonmic;
 
-static bool g_running = true;
-static AudioReceiver* g_receiver = nullptr;
+static volatile std::sig_atomic_t g_shutdown_requested = 0;
 
 bool g_debug_mode = false;
 
@@ -103,15 +102,57 @@ static void setWindowIcon(GLFWwindow* window) {
 #endif
 
 void signal_handler(int) {
-    std::cout << "\n[Main] Shutting down..." << std::endl;
-    g_running = false;
-
-    if (g_receiver) {
-        g_receiver->stop();
-    }
+    g_shutdown_requested = 1;
 }
 
 #ifdef USE_IMGUI
+
+static void drawSunshineWebUILoginPopup(SunshineWebUI& sunshine_webui) {
+    const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Sunshine Web UI Login", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+        static char webui_username[128] = "";
+        static char webui_password[128] = "";
+        static std::string login_error = "";
+
+        ImGui::Text("Login to Sunshine Web UI");
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImGui::InputText("Username", webui_username, sizeof(webui_username));
+        ImGui::InputText("Password", webui_password, sizeof(webui_password), ImGuiInputTextFlags_Password);
+
+        if (!login_error.empty()) {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1, 0, 0, 1), "%s", login_error.c_str());
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        if (ImGui::Button("Login", ImVec2(120, 0))) {
+            if (sunshine_webui.login(webui_username, webui_password)) {
+                login_error = "";
+                memset(webui_password, 0, sizeof(webui_password));
+                ImGui::CloseCurrentPopup();
+            } else {
+                login_error = "Invalid Sunshine credentials";
+            }
+        }
+
+        ImGui::SameLine();
+
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            login_error = "";
+            ImGui::CloseCurrentPopup();
+        }
+
+        ImGui::EndPopup();
+    }
+}
 
 void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration& sunshine,
                SunshineWebUI& sunshine_webui, DisplayManager& display_mgr, DisplaySettingsGUI& display_settings_gui,
@@ -286,8 +327,10 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
 
                     is_installing = true;
                     ImGui::OpenPopup("Installing Driver");
-                    install_future =
-                        std::async(std::launch::async, [&installer]() { return installer.installSteamMicrophone(); });
+                    install_future = std::async(std::launch::async, []() {
+                        DriverInstaller installer;
+                        return installer.installSteamMicrophone();
+                    });
                 }
             }
         }
@@ -319,8 +362,10 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                         is_uninstalling = true;
                         ImGui::OpenPopup("Uninstalling Driver");
 
-                        uninstall_future = std::async(std::launch::async,
-                                                      [&installer]() { return installer.uninstallSteamMicrophone(); });
+                        uninstall_future = std::async(std::launch::async, []() {
+                            DriverInstaller installer;
+                            return installer.uninstallSteamMicrophone();
+                        });
                     }
                 }
             } else {
@@ -331,8 +376,10 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                     } else {
                         is_installing = true;
                         ImGui::OpenPopup("Installing Driver");
-                        install_future = std::async(std::launch::async,
-                                                    [&installer]() { return installer.installSteamMicrophone(); });
+                        install_future = std::async(std::launch::async, []() {
+                            DriverInstaller installer;
+                            return installer.installSteamMicrophone();
+                        });
                     }
                 }
             }
@@ -423,8 +470,10 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                 ImGui::CloseCurrentPopup();
                 is_installing = true;
                 ImGui::OpenPopup("Installing Driver");
-                install_future =
-                    std::async(std::launch::async, [&installer]() { return installer.installSteamMicrophone(); });
+                install_future = std::async(std::launch::async, []() {
+                    DriverInstaller installer;
+                    return installer.installSteamMicrophone();
+                });
             }
         }
 
@@ -582,51 +631,6 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                 ImGui::OpenPopup("Sunshine Web UI Login");
             }
             ShowHelpTooltip(Tooltips::SUNSHINE_WEBUI);
-
-            ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-            ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-
-            if (ImGui::BeginPopupModal("Sunshine Web UI Login", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::Text("Login to Sunshine Web UI");
-                ImGui::Spacing();
-                ImGui::Separator();
-                ImGui::Spacing();
-
-                static char webui_username[128] = "";
-                static char webui_password[128] = "";
-                static std::string login_error = "";
-
-                ImGui::InputText("Username", webui_username, sizeof(webui_username));
-                ImGui::InputText("Password", webui_password, sizeof(webui_password), ImGuiInputTextFlags_Password);
-
-                if (!login_error.empty()) {
-                    ImGui::Spacing();
-                    ImGui::TextColored(ImVec4(1, 0, 0, 1), "%s", login_error.c_str());
-                }
-
-                ImGui::Spacing();
-                ImGui::Separator();
-                ImGui::Spacing();
-
-                if (ImGui::Button("Login", ImVec2(120, 0))) {
-                    if (sunshine_webui.login(webui_username, webui_password)) {
-                        login_error = "";
-                        memset(webui_password, 0, sizeof(webui_password));
-                        ImGui::CloseCurrentPopup();
-                    } else {
-                        login_error = "Invalid Sunshine credentials";
-                    }
-                }
-
-                ImGui::SameLine();
-
-                if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-                    login_error = "";
-                    ImGui::CloseCurrentPopup();
-                }
-
-                ImGui::EndPopup();
-            }
         }
     } else {
 
@@ -638,50 +642,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
         }
     }
 
-    ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-
-    if (ImGui::BeginPopupModal("Sunshine Web UI Login", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Login to Sunshine Web UI");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        static char webui_username[128] = "";
-        static char webui_password[128] = "";
-        static std::string login_error = "";
-
-        ImGui::InputText("Username", webui_username, sizeof(webui_username));
-        ImGui::InputText("Password", webui_password, sizeof(webui_password), ImGuiInputTextFlags_Password);
-
-        if (!login_error.empty()) {
-            ImGui::Spacing();
-            ImGui::TextColored(ImVec4(1, 0, 0, 1), "%s", login_error.c_str());
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        if (ImGui::Button("Login", ImVec2(120, 0))) {
-            if (sunshine_webui.login(webui_username, webui_password)) {
-                login_error = "";
-                memset(webui_password, 0, sizeof(webui_password));
-                ImGui::CloseCurrentPopup();
-            } else {
-                login_error = "Invalid Sunshine credentials";
-            }
-        }
-
-        ImGui::SameLine();
-
-        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-            login_error = "";
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-    }
+    drawSunshineWebUILoginPopup(sunshine_webui);
 
     ImGui::Separator();
 
@@ -1189,22 +1150,23 @@ int main_gui(int, char*[]) {
         std::cerr << "[Main] Failed to start receiver" << std::endl;
     }
 
-    g_receiver = &receiver;
+    auto version_check = std::async(std::launch::async, &VersionChecker::checkForUpdates);
 
-    VersionChecker version_checker;
-    version_checker.checkForUpdates([](const VersionChecker::VersionInfo& info) {
-        g_update_check_done = true;
-        if (info.update_available) {
-            std::cout << "[VersionChecker] Update available: " << info.latest_version << std::endl;
-            g_update_available = true;
-            g_latest_version = info.latest_version;
-            g_download_url = info.download_url;
-        } else {
-            std::cout << "[VersionChecker] No update available (current: " << info.current_version << ")" << std::endl;
+    while (!glfwWindowShouldClose(window) && g_shutdown_requested == 0) {
+
+        if (!g_update_check_done && version_check.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            const auto info = version_check.get();
+            g_update_check_done = true;
+            if (info.update_available) {
+                std::cout << "[VersionChecker] Update available: " << info.latest_version << std::endl;
+                g_update_available = true;
+                g_latest_version = info.latest_version;
+                g_download_url = info.download_url;
+            } else {
+                std::cout << "[VersionChecker] No update available (current: " << info.current_version << ")"
+                          << std::endl;
+            }
         }
-    });
-
-    while (!glfwWindowShouldClose(window) && g_running) {
 
         auto temp_stats = receiver.getStats();
         bool is_active = temp_stats.is_receiving || g_debug_mode || g_update_available;
@@ -1359,8 +1321,6 @@ int main_console(int argc, char* argv[]) {
     signal(SIGTERM, signal_handler);
 
     AudioReceiver receiver;
-    g_receiver = &receiver;
-
     if (!receiver.start(config)) {
         std::cerr << "[Main] Failed to start receiver" << std::endl;
         return 1;
@@ -1368,7 +1328,7 @@ int main_console(int argc, char* argv[]) {
 
     std::cout << "[Main] Press Ctrl+C to stop" << std::endl;
 
-    while (g_running) {
+    while (g_shutdown_requested == 0) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
         auto stats = receiver.getStats();

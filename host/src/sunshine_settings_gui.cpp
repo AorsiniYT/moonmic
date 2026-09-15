@@ -78,9 +78,9 @@ void SunshineSettingsGUI::render(SunshineWebUI& webui, Config& config) {
             config.sunshine.host = host_buf;
         }
 
-        if (ImGui::InputInt("Sunshine Port", &config.sunshine.port)) {
-            if (config.sunshine.port < 1 || config.sunshine.port > 65535) {
-                config.sunshine.port = 47989;
+        if (ImGui::InputInt("Sunshine WebUI Port", &config.sunshine.webui_port)) {
+            if (config.sunshine.webui_port < 1 || config.sunshine.webui_port > 65535) {
+                config.sunshine.webui_port = 47990;
             }
         }
 

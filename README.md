@@ -48,16 +48,24 @@ See [INTEGRATION.md](INTEGRATION.md) for the client API and
 
 ## Host packages
 
+The host GUI needs curl and SpeexDSP at runtime; both build from submodules,
+nothing to install by hand.
+
 The manual `Create release` GitHub Actions workflow reads `VERSION`, builds the
 Windows and Linux hosts, and publishes:
 
 - `moonmic-host-<version>-windows-x86_64.zip`
 - `moonmic-host-<version>-linux-x86_64.tar.gz`
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and validation guidance.
+
 ## License
 
-Moonmic is distributed under the terms in [LICENSE](LICENSE). Bundled drivers
-and submodules retain their respective licenses.
+Moonmic's own source is distributed under the terms in [LICENSE](LICENSE).
+Bundled drivers and submodules retain the terms listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Credits
 

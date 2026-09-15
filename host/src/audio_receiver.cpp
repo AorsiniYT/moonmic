@@ -14,9 +14,8 @@
 namespace moonmic {
 
 AudioReceiver::AudioReceiver()
-    : sunshine_(nullptr), decoder_(nullptr), resampler_(nullptr), receiver_(nullptr), virtual_device_(nullptr),
-      connection_monitor_(nullptr), running_(false), paused_(false), client_validated_(false), detected_stream_rate_(0),
-      system_sample_rate_(0) {
+    : sunshine_(nullptr), decoder_(nullptr), receiver_(nullptr), virtual_device_(nullptr), connection_monitor_(nullptr),
+      running_(false), paused_(false), client_validated_(false), detected_stream_rate_(0), system_sample_rate_(0) {
 }
 
 AudioReceiver::~AudioReceiver() {
@@ -50,10 +49,7 @@ void AudioReceiver::resetConnectionState() {
         }
     }
 
-    if (resampler_) {
-        speex_resampler_destroy(resampler_);
-        resampler_ = nullptr;
-    }
+    resampler_.reset();
     detected_stream_rate_ = 0;
 }
 
@@ -115,7 +111,7 @@ bool AudioReceiver::start(const Config& config) {
         config_.audio.resampling_rate = decoder_rate;
     }
 
-    resampler_ = nullptr;
+    resampler_.reset();
 
     receiver_ = std::make_unique<UDPReceiver>();
     receiver_->setPacketCallback([this](const uint8_t* data, size_t size, const std::string& ip, uint16_t port,
@@ -143,7 +139,8 @@ void AudioReceiver::stop() {
         if (stopping_) {
             return;
         }
-        if (!running_ && !receiver_ && !virtual_device_ && !decoder_ && !connection_monitor_ && !resampler_) {
+        if (!running_ && !receiver_ && !virtual_device_ && !decoder_ && !connection_monitor_ &&
+            !resampler_.isInitialized()) {
             std::cout << "[AudioReceiver] Already stopped" << std::endl;
             return;
         }
@@ -166,10 +163,7 @@ void AudioReceiver::stop() {
         virtual_device_.reset();
     }
 
-    if (resampler_) {
-        speex_resampler_destroy(resampler_);
-        resampler_ = nullptr;
-    }
+    resampler_.reset();
 
     detected_stream_rate_ = 0;
     system_sample_rate_ = 0;
@@ -255,11 +249,10 @@ void AudioReceiver::sendControlSignalInternal(uint32_t signal_magic) {
         return;
     }
 
-    moonmic_control_packet_t packet;
-    packet.magic = signal_magic;
-    packet.reserved = 0;
+    uint8_t packet[sizeof(moonmic_control_packet_t)];
+    moonmic_write_control_le(packet, signal_magic);
 
-    connection_monitor_->sendPacket(&packet, sizeof(packet));
+    connection_monitor_->sendPacket(packet, sizeof(packet));
 
     const char* signal_name = (signal_magic == MOONMIC_CTRL_STOP)    ? "STOP"
                               : (signal_magic == MOONMIC_CTRL_START) ? "START"
@@ -282,10 +275,7 @@ bool AudioReceiver::switchAudioOutput(bool use_speakers) {
         virtual_device_.reset();
     }
 
-    if (resampler_) {
-        speex_resampler_destroy(resampler_);
-        resampler_ = nullptr;
-    }
+    resampler_.reset();
     detected_stream_rate_ = 0;
 
     config_.audio.use_speaker_mode = use_speakers;
@@ -371,9 +361,10 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
             return;
         }
 
-        const auto* request = reinterpret_cast<const moonmic_focus_request_t*>(data);
-        if (request->version != MOONMIC_FOCUS_PROTOCOL_VERSION ||
-            (config_.security.enable_whitelist && request->pair_status != 1)) {
+        moonmic_focus_request_t request = {};
+        moonmic_read_focus_request_le(data, &request);
+        if (request.version != MOONMIC_FOCUS_PROTOCOL_VERSION ||
+            (config_.security.enable_whitelist && request.pair_status != 1)) {
             return;
         }
 
@@ -388,8 +379,10 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         response.source = focus.source;
         response.normalized_x = focus.normalized_x;
         response.normalized_y = focus.normalized_y;
-        response.request_id = request->request_id;
-        receiver_->sendTo(&response, sizeof(response), sender_ip, sender_port);
+        response.request_id = request.request_id;
+        uint8_t response_wire[sizeof(moonmic_focus_response_t)];
+        moonmic_write_focus_response_le(response_wire, &response);
+        receiver_->sendTo(response_wire, sizeof(response_wire), sender_ip, sender_port);
         return;
     }
     stats_.packets_received++;
@@ -398,9 +391,8 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
     stats_.is_receiving = true;
     last_packet_time_ = std::chrono::steady_clock::now();
 
-    const bool is_handshake_magic = (size >= sizeof(moonmic_handshake_t)) &&
-                                    (((const moonmic_handshake_t*)data)->magic == MOONMIC_HANDSHAKE_MAGIC ||
-                                     ((const moonmic_handshake_t*)data)->magic == MOONMIC_HANDSHAKE_MAGIC_ALT);
+    const bool is_handshake_magic =
+        (size >= sizeof(moonmic_handshake_t)) && moonmic_read_u32_le(data) == MOONMIC_HANDSHAKE_MAGIC;
 
     if (is_handshake_magic) {
 
@@ -426,34 +418,35 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
         std::vector<uint8_t> ack_buffer(data, data + size);
 
-        moonmic_handshake_t* ack = (moonmic_handshake_t*)ack_buffer.data();
-        ack->magic = MOONMIC_HANDSHAKE_ACK;
+        moonmic_handshake_t ack = {};
+        moonmic_read_handshake_le(ack_buffer.data(), &ack);
+        ack.magic = MOONMIC_HANDSHAKE_ACK;
         if (current_w > 0 && current_h > 0) {
-            ack->display_width = current_w;
-            ack->display_height = current_h;
+            ack.display_width = current_w;
+            ack.display_height = current_h;
         }
 
-        connection_monitor_->sendPacket(ack_buffer.data(), ack_buffer.size());
+        uint8_t ack_wire[sizeof(moonmic_handshake_t)];
+        moonmic_write_handshake_le(ack_wire, &ack);
+
+        connection_monitor_->sendPacket(ack_wire, sizeof(ack_wire));
         std::cout << "[AudioReceiver] Sent Handshake ACK (" << size << " bytes) to " << sender_ip << std::endl;
 
         return;
     }
 
     if (size == sizeof(moonmic_ping_packet_t)) {
-        uint32_t magic;
-        memcpy(&magic, data, 4);
+        uint32_t magic = moonmic_read_u32_le(data);
 
         if (magic == MOONMIC_PING_MAGIC) {
             if (receiver_) {
-                moonmic_ping_packet_t pong;
-                memcpy(&pong, data, sizeof(pong));
-                pong.magic = MOONMIC_PONG_MAGIC;
-                receiver_->sendTo(&pong, sizeof(pong), sender_ip, sender_port);
+                uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(data));
+                receiver_->sendTo(pong, sizeof(pong), sender_ip, sender_port);
             }
             return;
         } else if (magic == MOONMIC_PONG_MAGIC) {
-            uint64_t timestamp;
-            memcpy(&timestamp, data + 4, 8);
+            uint64_t timestamp = moonmic_read_ping_timestamp_le(data);
 
             auto now = std::chrono::system_clock::now();
             auto duration = now.time_since_epoch();
@@ -461,7 +454,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
             int64_t diff_us = (int64_t)(now_us - timestamp);
 
-            if (diff_us >= 0 && diff_us < 5000000) {
+            if (diff_us >= 0 && diff_us < 3000000) {
                 stats_.rtt_ms = (int)(diff_us / 1000);
             }
 
@@ -489,6 +482,13 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         return;
     }
 
+    // Audio is only accepted from the peer that completed the handshake; with
+    // the whitelist on, a stray datagram with a valid magic must not inject.
+    if (config_.security.enable_whitelist && (!client_validated_ || sender_ip != last_validated_ip_)) {
+        stats_.packets_dropped++;
+        return;
+    }
+
     if (is_lagging) {
         lag_drop_count_++;
         if (lag_drop_count_ % 50 == 0) {
@@ -506,6 +506,12 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
     bool is_raw_mode = (sample_rate_field & MOONMIC_RAW_FLAG) != 0;
     uint32_t stream_rate = sample_rate_field & ~MOONMIC_RAW_FLAG;
 
+    if (stream_rate < 8000 || stream_rate > 192000) {
+        stats_.packets_dropped++;
+        std::cerr << "[AudioReceiver] Unsupported stream sample rate: " << stream_rate << " Hz" << std::endl;
+        return;
+    }
+
     if (stats_.packets_received == 1) {
         std::cout << "[AudioReceiver] FIRST PACKET DEBUG (manual read):" << std::endl;
         std::cout << "  Packet size: " << size << " bytes" << std::endl;
@@ -522,32 +528,33 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         std::cout << std::dec << std::endl << std::endl;
     }
 
-    if (detected_stream_rate_ == 0) {
-        detected_stream_rate_ = stream_rate;
+    if (!resampler_.isInitialized() || detected_stream_rate_ != stream_rate) {
+        const bool first_packet = detected_stream_rate_ == 0;
+        const uint32_t previous_rate = detected_stream_rate_;
+        const int error = resampler_.configure(config_.audio.channels, stream_rate, system_sample_rate_);
+        if (error != RESAMPLER_ERR_SUCCESS) {
+            stats_.packets_dropped++;
+            std::cerr << "[AudioReceiver] Failed to configure resampler: " << error << std::endl;
+            return;
+        }
 
-        std::cout << "[AudioReceiver] Stream detected" << std::endl;
+        detected_stream_rate_ = stream_rate;
+        resampler_packet_count_ = 0;
+
+        std::cout << "[AudioReceiver] " << (first_packet ? "Stream detected" : "Stream sample rate changed")
+                  << std::endl;
         std::cout << "[AudioReceiver] Source IP: " << sender_ip << std::endl;
+        if (!first_packet) {
+            std::cout << "[AudioReceiver] Previous sample rate: " << previous_rate << " Hz" << std::endl;
+        }
         std::cout << "[AudioReceiver] Stream sample rate: " << stream_rate << " Hz" << std::endl;
         std::cout << "[AudioReceiver] Output sample rate: " << system_sample_rate_ << " Hz" << std::endl;
         std::cout << "[AudioReceiver] Mode: " << (is_raw_mode ? "RAW PCM" : "Opus") << std::endl;
 
-        if (!resampler_ || stream_rate != detected_stream_rate_) {
-
-            int err = 0;
-            if (resampler_) speex_resampler_destroy(resampler_);
-
-            resampler_ = speex_resampler_init(config_.audio.channels, stream_rate, system_sample_rate_, 10, &err);
-
-            if (err != RESAMPLER_ERR_SUCCESS || !resampler_) {
-                std::cerr << "[AudioReceiver] Failed to create resampler: " << err << std::endl;
-                return;
-            }
-
-            std::cout << "[AudioReceiver] Resampler active: " << stream_rate << "Hz -> " << system_sample_rate_
-                      << "Hz (quality 10)" << std::endl;
-            if (stream_rate == system_sample_rate_) {
-                std::cout << "[AudioReceiver] (Resampler enabled for Drift Correction)" << std::endl;
-            }
+        std::cout << "[AudioReceiver] Resampler active: " << stream_rate << "Hz -> " << system_sample_rate_
+                  << "Hz (quality 10)" << std::endl;
+        if (stream_rate == system_sample_rate_) {
+            std::cout << "[AudioReceiver] (Resampler enabled for Drift Correction)" << std::endl;
         }
         std::cout << std::endl;
     }
@@ -575,13 +582,10 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
             decode_buffer_[i] = static_cast<float>(sample) / 32768.0f;
         }
 
-        if (resampler_) {
+        if (resampler_.isInitialized()) {
 
             if (++resampler_packet_count_ % 10 == 0) {
                 float usage = virtual_device_->getBufferUsage();
-
-                spx_uint32_t in_rate, out_rate;
-                speex_resampler_get_rate(resampler_, &in_rate, &out_rate);
 
                 int base_rate = static_cast<int>(system_sample_rate_);
 
@@ -597,14 +601,13 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
                     if (target_rate > base_rate + 4000) target_rate = base_rate + 4000;
                     if (target_rate < base_rate - 4000) target_rate = base_rate - 4000;
 
-                    if (std::abs(target_rate - static_cast<int>(out_rate)) > 10) {
-
-                        speex_resampler_set_rate(resampler_, in_rate, (spx_uint32_t)target_rate);
+                    if (std::abs(target_rate - static_cast<int>(resampler_.outputRate())) > 10) {
+                        resampler_.setRates(resampler_.inputRate(), static_cast<uint32_t>(target_rate));
                     }
                 }
             }
 
-            spx_uint32_t in_len = output_frames;
+            uint32_t in_len = static_cast<uint32_t>(output_frames);
 
 #ifdef _WIN32
             if (!config_.audio.use_speaker_mode) {
@@ -631,9 +634,9 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
             }
 #endif
 
-            spx_uint32_t out_len = MAX_FRAMES;
+            uint32_t out_len = MAX_FRAMES;
 
-            int err = speex_resampler_process_float(resampler_, 0, decode_buffer_, &in_len, resample_buffer_, &out_len);
+            int err = resampler_.process(decode_buffer_, in_len, resample_buffer_, out_len);
 
             if (err != RESAMPLER_ERR_SUCCESS) {
                 stats_.packets_dropped++;
@@ -664,11 +667,11 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
         output_frames = decoded_frames;
 
-        if (system_sample_rate_ != detected_stream_rate_ && resampler_) {
-            spx_uint32_t in_len = decoded_frames;
-            spx_uint32_t out_len = MAX_FRAMES;
+        if (system_sample_rate_ != detected_stream_rate_ && resampler_.isInitialized()) {
+            uint32_t in_len = static_cast<uint32_t>(decoded_frames);
+            uint32_t out_len = MAX_FRAMES;
 
-            int err = speex_resampler_process_float(resampler_, 0, decode_buffer_, &in_len, resample_buffer_, &out_len);
+            int err = resampler_.process(decode_buffer_, in_len, resample_buffer_, out_len);
 
             if (err != RESAMPLER_ERR_SUCCESS) {
                 stats_.packets_dropped++;
@@ -728,21 +731,27 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
         return false;
     }
 
-    const moonmic_handshake_t* hs = reinterpret_cast<const moonmic_handshake_t*>(data);
+    moonmic_handshake_t hs = {};
+    moonmic_read_handshake_le(data, &hs);
 
-    uint32_t magic = hs->magic;
-    if (magic != MOONMIC_HANDSHAKE_MAGIC && magic != MOONMIC_HANDSHAKE_MAGIC_ALT) {
-        std::cerr << "[AudioReceiver] Invalid handshake magic: 0x" << std::hex << magic << std::dec << std::endl;
+    if (hs.magic != MOONMIC_HANDSHAKE_MAGIC) {
+        std::cerr << "[AudioReceiver] Invalid handshake magic: 0x" << std::hex << hs.magic << std::dec << std::endl;
         return false;
     }
 
-    if (hs->uniqueid_len > 0 && hs->uniqueid_len <= 16) {
-        client_uniqueid_ = std::string(hs->uniqueid, hs->uniqueid_len);
+    if (hs.uniqueid_len > 0 && hs.uniqueid_len <= 16) {
+        client_uniqueid_ = std::string(hs.uniqueid, hs.uniqueid_len);
     }
 
-    if (hs->devicename_len > 0 && hs->devicename_len <= 64) {
-        client_devicename_ = std::string(hs->devicename, hs->devicename_len);
+    if (hs.devicename_len > 0 && hs.devicename_len <= 64) {
+        client_devicename_ = std::string(hs.devicename, hs.devicename_len);
         stats_.client_name = client_devicename_;
+    }
+
+    if (config_.security.enable_whitelist && !isClientAllowed(sender_ip)) {
+        std::cerr << "[AudioReceiver] DENY: " << sender_ip
+                  << " is not in the client whitelist" << std::endl;
+        return false;
     }
 
     if (!config_.security.enable_whitelist) {
@@ -755,7 +764,7 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
 
     // Sunshine assigns its own client UUID, so it cannot be matched against the
 
-    if (hs->pair_status != 1) {
+    if (hs.pair_status != 1) {
         auto now = std::chrono::steady_clock::now();
         auto grace_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_validated_time_).count();
         bool grace = (last_validated_time_.time_since_epoch().count() != 0) && (last_validated_ip_ == sender_ip) &&
@@ -766,7 +775,7 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
                       << "ms since last validation)" << std::endl;
         } else {
             std::cerr << "[AudioReceiver] DENY: Client '" << client_devicename_
-                      << "' not validated by Sunshine (pair_status=" << (int)hs->pair_status << ")" << std::endl;
+                      << "' not validated by Sunshine (pair_status=" << (int)hs.pair_status << ")" << std::endl;
             std::cerr << "[AudioReceiver] Ensure client is paired with Sunshine host" << std::endl;
             return false;
         }
@@ -774,9 +783,9 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
 
     std::cout << "[AudioReceiver] Client validated (pair_status=1): " << client_devicename_ << std::endl;
 
-    if (hs->version >= MOONMIC_PROTOCOL_VERSION && hs->display_width > 0 && hs->display_height > 0) {
-        std::cout << "[AudioReceiver] Client requests display resolution: " << hs->display_width << "x"
-                  << hs->display_height << std::endl;
+    if (hs.version >= MOONMIC_PROTOCOL_VERSION && hs.display_width > 0 && hs.display_height > 0) {
+        std::cout << "[AudioReceiver] Client requests display resolution: " << hs.display_width << "x"
+                  << hs.display_height << std::endl;
 
         out_w = 0;
         out_h = 0;
@@ -784,33 +793,33 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
             sunshine_webui_->getCurrentResolution(out_w, out_h);
         }
 
-        bool force_update = (hs->flags & MOONMIC_FLAG_FORCE_UPDATE) != 0;
+        bool force_update = (hs.flags & MOONMIC_FLAG_FORCE_UPDATE) != 0;
         bool should_update = true;
 
         if (out_w > 0 && out_h > 0 && !force_update) {
-            if (out_w != hs->display_width || out_h != hs->display_height) {
+            if (out_w != hs.display_width || out_h != hs.display_height) {
                 std::cout << "[AudioReceiver] Resolution mismatch (Current: " << out_w << "x" << out_h
-                          << ", Target: " << hs->display_width << "x" << hs->display_height
+                          << ", Target: " << hs.display_width << "x" << hs.display_height
                           << "). Waiting for FORCE flag." << std::endl;
                 should_update = false;
             }
         }
 
         bool is_valid = false;
-        if (hs->display_width == 1280 && hs->display_height == 720) is_valid = true;
-        if (hs->display_width == 1600 && hs->display_height == 900) is_valid = true;
-        if (hs->display_width == 1920 && hs->display_height == 1080) is_valid = true;
-        if (hs->display_width == 2560 && hs->display_height == 1440) is_valid = true;
-        if (hs->display_width == 3840 && hs->display_height == 2160) is_valid = true;
+        if (hs.display_width == 1280 && hs.display_height == 720) is_valid = true;
+        if (hs.display_width == 1600 && hs.display_height == 900) is_valid = true;
+        if (hs.display_width == 1920 && hs.display_height == 1080) is_valid = true;
+        if (hs.display_width == 2560 && hs.display_height == 1440) is_valid = true;
+        if (hs.display_width == 3840 && hs.display_height == 2160) is_valid = true;
 
         if (is_valid && should_update) {
-            if (!applyDisplayResolution(hs->display_width, hs->display_height)) {
+            if (!applyDisplayResolution(hs.display_width, hs.display_height)) {
                 std::cerr << "[AudioReceiver] Warning: host resolution request could not be applied automatically"
                           << std::endl;
             }
         } else if (!is_valid) {
-            std::cerr << "[AudioReceiver] Invalid resolution request: " << hs->display_width << "x"
-                      << hs->display_height << std::endl;
+            std::cerr << "[AudioReceiver] Invalid resolution request: " << hs.display_width << "x"
+                      << hs.display_height << std::endl;
         }
     }
 

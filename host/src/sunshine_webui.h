@@ -49,12 +49,11 @@ class SunshineWebUI {
   private:
     Config& config_;
     std::vector<WebUIPairedClient> paired_clients_;
+    std::string session_password_;
 
     std::string generateAuthHeader() const;
 
     void saveCredentials();
-
-    void loadCredentials();
 };
 
 } // namespace moonmic
