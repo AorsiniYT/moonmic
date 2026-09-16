@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "../virtual_device.h"
 #include "driver_installer.h"
@@ -27,7 +28,7 @@ class VirtualDeviceWindows : public VirtualDevice {
 
         HRESULT hr = CoInitialize(NULL);
         if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
-            std::cerr << "[VirtualDevice] Failed to initialize COM: 0x" << std::hex << hr << std::endl;
+            moonmic::logError() << "[VirtualDevice] Failed to initialize COM: 0x" << std::hex << hr << std::endl;
         }
     }
 
@@ -42,14 +43,14 @@ class VirtualDeviceWindows : public VirtualDevice {
 
         if (device_name.empty()) {
 
-            std::cout << "[VirtualDevice] Using default system speakers (debug mode)" << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] Using default system speakers (debug mode)" << std::endl;
 
             IMMDeviceEnumerator* enumerator = NULL;
             hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                                   (void**)&enumerator);
 
             if (FAILED(hr)) {
-                std::cerr << "[VirtualDevice] Failed to create device enumerator" << std::endl;
+                moonmic::logError() << "[VirtualDevice] Failed to create device enumerator" << std::endl;
                 return false;
             }
 
@@ -57,42 +58,42 @@ class VirtualDeviceWindows : public VirtualDevice {
             enumerator->Release();
 
             if (FAILED(hr) || !device) {
-                std::cerr << "[VirtualDevice] Failed to get default audio device" << std::endl;
+                moonmic::logError() << "[VirtualDevice] Failed to get default audio device" << std::endl;
                 return false;
             }
 
-            std::cout << "[VirtualDevice] Initialized with default speakers" << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] Initialized with default speakers" << std::endl;
         } else {
 
             std::string playback_device_name = device_name;
 
             if (device_name == "CABLE Output") {
                 playback_device_name = "CABLE Input";
-                std::cout << "[VirtualDevice] Mapped VB-Cable: " << device_name << " -> " << playback_device_name
+                moonmic::logInfo() << "[VirtualDevice] Mapped VB-Cable: " << device_name << " -> " << playback_device_name
                           << std::endl;
             }
 
-            std::cout << "[VirtualDevice] Searching for playback device: " << playback_device_name << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] Searching for playback device: " << playback_device_name << std::endl;
 
             device = findDeviceByName(playback_device_name);
             if (!device) {
-                std::cerr << "[VirtualDevice] Failed to find virtual audio device: " << playback_device_name
+                moonmic::logError() << "[VirtualDevice] Failed to find virtual audio device: " << playback_device_name
                           << std::endl;
-                std::cerr << "[VirtualDevice] Make sure the driver is installed and the device name is correct"
+                moonmic::logError() << "[VirtualDevice] Make sure the driver is installed and the device name is correct"
                           << std::endl;
-                std::cerr << "[VirtualDevice] Original recording endpoint: " << device_name << std::endl;
+                moonmic::logError() << "[VirtualDevice] Original recording endpoint: " << device_name << std::endl;
                 return false;
             }
 
-            std::cout << "[VirtualDevice] Successfully opened playback device: " << playback_device_name << std::endl;
-            std::cout << "[VirtualDevice] Virtual microphone endpoint: " << device_name << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] Successfully opened playback device: " << playback_device_name << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] Virtual microphone endpoint: " << device_name << std::endl;
         }
 
         hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, NULL, (void**)&audio_client_);
         device->Release();
 
         if (FAILED(hr)) {
-            std::cerr << "[VirtualDevice] Failed to activate audio client" << std::endl;
+            moonmic::logError() << "[VirtualDevice] Failed to activate audio client" << std::endl;
             return false;
         }
 
@@ -121,21 +122,21 @@ class VirtualDeviceWindows : public VirtualDevice {
         WAVEFORMATEX* closest_match = nullptr;
         bool using_allocated_format = false;
 
-        std::cout << "[VirtualDevice] Requesting 32-bit IEEE Float format..." << std::endl;
+        moonmic::logInfo() << "[VirtualDevice] Requesting 32-bit IEEE Float format..." << std::endl;
         hr = audio_client_->IsFormatSupported(AUDCLNT_SHAREMODE_SHARED, target_req, &closest_match);
 
         if (hr == S_OK) {
-            std::cout << "[VirtualDevice] System accepted 32-bit Float format" << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] System accepted 32-bit Float format" << std::endl;
             target_format = target_req;
         } else {
-            std::cerr << "[VirtualDevice] 32-bit Float rejected (hr=0x" << std::hex << hr << ")" << std::endl;
+            moonmic::logError() << "[VirtualDevice] 32-bit Float rejected (hr=0x" << std::hex << hr << ")" << std::endl;
 
             if (hr == S_FALSE && closest_match) {
-                std::cout << "[VirtualDevice] Using closest match suggested by system" << std::endl;
+                moonmic::logInfo() << "[VirtualDevice] Using closest match suggested by system" << std::endl;
                 target_format = closest_match;
                 using_allocated_format = true;
             } else {
-                std::cout << "[VirtualDevice] Falling back to system Mix Format" << std::endl;
+                moonmic::logInfo() << "[VirtualDevice] Falling back to system Mix Format" << std::endl;
                 target_format = mix_format;
             }
         }
@@ -145,36 +146,36 @@ class VirtualDeviceWindows : public VirtualDevice {
 
         if (target_format->wBitsPerSample == 16) {
             convert_to_int16_ = true;
-            std::cout << "[VirtualDevice] Format is 16-bit Integer. Enabling Float->Int16 conversion." << std::endl;
+            moonmic::logInfo() << "[VirtualDevice] Format is 16-bit Integer. Enabling Float->Int16 conversion." << std::endl;
         } else if (target_format->wBitsPerSample == 32) {
 
             if (target_format->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {
                 convert_to_int16_ = false;
-                std::cout << "[VirtualDevice] Format is 32-bit IEEE Float. No conversion needed." << std::endl;
+                moonmic::logInfo() << "[VirtualDevice] Format is 32-bit IEEE Float. No conversion needed." << std::endl;
             } else if (target_format->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
                 WAVEFORMATEXTENSIBLE* ext = (WAVEFORMATEXTENSIBLE*)target_format;
                 if (IsEqualGUID(ext->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT)) {
                     convert_to_int16_ = false;
-                    std::cout << "[VirtualDevice] Format is 32-bit IEEE Float (Extensible). No conversion needed."
+                    moonmic::logInfo() << "[VirtualDevice] Format is 32-bit IEEE Float (Extensible). No conversion needed."
                               << std::endl;
                 } else {
                     convert_to_int16_ = false;
-                    std::cout
+                    moonmic::logInfo()
                         << "[VirtualDevice] Format is 32-bit Extensible (SubFormat unknown). Assuming Float to be safe."
                         << std::endl;
                 }
             } else {
                 convert_to_int16_ = false;
-                std::cout << "[VirtualDevice] Format is 32-bit (Tag " << target_format->wFormatTag
+                moonmic::logInfo() << "[VirtualDevice] Format is 32-bit (Tag " << target_format->wFormatTag
                           << "). Assuming Float." << std::endl;
             }
         } else {
             convert_to_int16_ = false;
-            std::cout << "[VirtualDevice] WARNING: Unknown bit depth " << target_format->wBitsPerSample
+            moonmic::logInfo() << "[VirtualDevice] WARNING: Unknown bit depth " << target_format->wBitsPerSample
                       << ". Assuming Float." << std::endl;
         }
 
-        std::cout << "[VirtualDevice] Target format: " << system_sample_rate_ << "Hz, " << system_channels_ << "ch"
+        moonmic::logInfo() << "[VirtualDevice] Target format: " << system_sample_rate_ << "Hz, " << system_channels_ << "ch"
                   << std::endl;
 
         hr = audio_client_->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 10000000, 0, target_format, NULL);
@@ -185,13 +186,13 @@ class VirtualDeviceWindows : public VirtualDevice {
         CoTaskMemFree(mix_format);
 
         if (FAILED(hr)) {
-            std::cerr << "[VirtualDevice] Failed to initialize (error: 0x" << std::hex << hr << ")" << std::endl;
+            moonmic::logError() << "[VirtualDevice] Failed to initialize (error: 0x" << std::hex << hr << ")" << std::endl;
             audio_client_->Release();
             audio_client_ = nullptr;
             return false;
         }
 
-        std::cout << "[VirtualDevice] Successfully initialized @ " << system_sample_rate_ << "Hz, " << system_channels_
+        moonmic::logInfo() << "[VirtualDevice] Successfully initialized @ " << system_sample_rate_ << "Hz, " << system_channels_
                   << "ch" << std::endl;
 
         hr = audio_client_->GetBufferSize(&buffer_frame_count_);
@@ -343,13 +344,13 @@ class VirtualDeviceWindows : public VirtualDevice {
                                       (void**)&enumerator);
 
         if (FAILED(hr)) {
-            std::cerr << "[VirtualDevice] Failed to create device enumerator" << std::endl;
+            moonmic::logError() << "[VirtualDevice] Failed to create device enumerator" << std::endl;
             return NULL;
         }
 
         hr = enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection);
         if (FAILED(hr)) {
-            std::cerr << "[VirtualDevice] Failed to enumerate audio endpoints" << std::endl;
+            moonmic::logError() << "[VirtualDevice] Failed to enumerate audio endpoints" << std::endl;
             enumerator->Release();
             return NULL;
         }
@@ -357,8 +358,8 @@ class VirtualDeviceWindows : public VirtualDevice {
         UINT count;
         collection->GetCount(&count);
 
-        std::cout << "[VirtualDevice] Searching for device: '" << target_name << "'" << std::endl;
-        std::cout << "[VirtualDevice] Found " << count << " render devices" << std::endl;
+        moonmic::logInfo() << "[VirtualDevice] Searching for device: '" << target_name << "'" << std::endl;
+        moonmic::logInfo() << "[VirtualDevice] Found " << count << " render devices" << std::endl;
 
         IMMDevice* result = NULL;
 
@@ -380,10 +381,10 @@ class VirtualDeviceWindows : public VirtualDevice {
                         std::wstring wname(var_name.pwszVal);
                         std::string name(wname.begin(), wname.end());
 
-                        std::cout << "[VirtualDevice]   Device " << i << ": '" << name << "'" << std::endl;
+                        moonmic::logInfo() << "[VirtualDevice]   Device " << i << ": '" << name << "'" << std::endl;
 
                         if (name == target_name || name.find(target_name) != std::string::npos) {
-                            std::cout << "[VirtualDevice] MATCH! Using device: '" << name << "'" << std::endl;
+                            moonmic::logInfo() << "[VirtualDevice] MATCH! Using device: '" << name << "'" << std::endl;
                             result = device;
                             result->AddRef();
                         }
@@ -400,7 +401,7 @@ class VirtualDeviceWindows : public VirtualDevice {
         }
 
         if (!result) {
-            std::cerr << "[VirtualDevice] No matching device found for: '" << target_name << "'" << std::endl;
+            moonmic::logError() << "[VirtualDevice] No matching device found for: '" << target_name << "'" << std::endl;
         }
 
         collection->Release();

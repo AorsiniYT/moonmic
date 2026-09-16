@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <atomic>
+#include <memory>
 
 #ifdef __cplusplus
 extern "C" {
@@ -16,30 +18,30 @@ typedef struct audio_capture_t audio_capture_t;
 
 struct moonmic_client_t {
 
-    moonmic_config_t config;
+    moonmic_config_t config{};
 
-    audio_capture_t* capture;
-    moonmic_opus_encoder_t* encoder;
-    udp_sender_t* sender;
+    audio_capture_t* capture = nullptr;
+    moonmic_opus_encoder_t* encoder = nullptr;
+    udp_sender_t* sender = nullptr;
 
-    bool active;
-    bool running;
+    bool active = false;
+    std::atomic<bool> running{false};
 
-    float* accumulation_buffer;
-    size_t accumulated_samples;
-    size_t target_frame_size;
+    std::unique_ptr<float[]> accumulation_buffer;
+    size_t accumulated_samples = 0;
+    size_t target_frame_size = 0;
 
-    moonmic_error_callback_t error_callback;
-    void* error_userdata;
-    moonmic_status_callback_t status_callback;
-    void* status_userdata;
+    moonmic_error_callback_t error_callback = nullptr;
+    void* error_userdata = nullptr;
+    moonmic_status_callback_t status_callback = nullptr;
+    void* status_userdata = nullptr;
 
-    void* thread_handle;
+    void* thread_handle = nullptr;
 
-    char uniqueid_storage[32];
-    char devicename_storage[128];
+    char uniqueid_storage[32]{};
+    char devicename_storage[128]{};
 
-    struct heartbeat_monitor_t* heartbeat_monitor;
+    struct heartbeat_monitor_t* heartbeat_monitor = nullptr;
 };
 
 struct audio_capture_t {

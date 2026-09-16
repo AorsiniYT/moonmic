@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "../virtual_device.h"
 #include <pulse/simple.h>
@@ -38,11 +39,11 @@ class VirtualDeviceLinux : public VirtualDevice {
                                &error);
 
         if (!pulse_) {
-            std::cerr << "[VirtualDevice] PulseAudio error: " << pa_strerror(error) << std::endl;
+            moonmic::logError() << "[VirtualDevice] PulseAudio error: " << pa_strerror(error) << std::endl;
             return false;
         }
 
-        std::cout << "[VirtualDevice] Initialized: " << device_name << std::endl;
+        moonmic::logInfo() << "[VirtualDevice] Initialized: " << device_name << std::endl;
         return true;
     }
 
@@ -55,7 +56,7 @@ class VirtualDeviceLinux : public VirtualDevice {
         int error;
 
         if (pa_simple_write(pulse_, data, bytes, &error) < 0) {
-            std::cerr << "[VirtualDevice] Write error: " << pa_strerror(error) << std::endl;
+            moonmic::logError() << "[VirtualDevice] Write error: " << pa_strerror(error) << std::endl;
             return false;
         }
 

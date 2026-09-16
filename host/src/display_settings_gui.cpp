@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #ifdef USE_IMGUI
 
@@ -88,9 +89,9 @@ void DisplaySettingsGUI::render(DisplayManager& display_mgr) {
 
         if (ImGui::Button("Apply Resolution", ImVec2(150, 30))) {
             if (display_mgr.setResolution(selected_width_, selected_height_, selected_refresh_)) {
-                std::cout << "[DisplaySettingsGUI] Resolution applied successfully" << std::endl;
+                moonmic::logInfo() << "[DisplaySettingsGUI] Resolution applied successfully" << std::endl;
             } else {
-                std::cerr << "[DisplaySettingsGUI] Failed to apply resolution" << std::endl;
+                moonmic::logError() << "[DisplaySettingsGUI] Failed to apply resolution" << std::endl;
             }
         }
 
@@ -98,7 +99,7 @@ void DisplaySettingsGUI::render(DisplayManager& display_mgr) {
 
         if (ImGui::Button("Restore Original", ImVec2(150, 30))) {
             if (display_mgr.restoreOriginalResolution()) {
-                std::cout << "[DisplaySettingsGUI] Resolution restored" << std::endl;
+                moonmic::logInfo() << "[DisplaySettingsGUI] Resolution restored" << std::endl;
             }
         }
 

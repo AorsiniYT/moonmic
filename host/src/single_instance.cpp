@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "single_instance.h"
 #include <iostream>
@@ -59,12 +60,12 @@ bool SingleInstance::isAnotherInstanceRunning() {
         return false;
     }
 
-    std::cout << "[SingleInstance] Mutex held, waiting for release..." << std::endl;
+    moonmic::logInfo() << "[SingleInstance] Mutex held, waiting for release..." << std::endl;
     for (int i = 0; i < 10; i++) {
         Sleep(200);
         result = WaitForSingleObject(mutex_, 0);
         if (result == WAIT_OBJECT_0 || result == WAIT_ABANDONED) {
-            std::cout << "[SingleInstance] Acquired mutex after wait" << std::endl;
+            moonmic::logInfo() << "[SingleInstance] Acquired mutex after wait" << std::endl;
             return false;
         }
     }
@@ -98,11 +99,11 @@ void SingleInstance::bringExistingToFront() {
         SetForegroundWindow(hwnd);
         BringWindowToTop(hwnd);
 
-        std::cout << "[SingleInstance] Brought existing window to front" << std::endl;
+        moonmic::logInfo() << "[SingleInstance] Brought existing window to front" << std::endl;
     }
 #else
 
-    std::cout << "[SingleInstance] Another instance is already running" << std::endl;
+    moonmic::logInfo() << "[SingleInstance] Another instance is already running" << std::endl;
 #endif
 }
 

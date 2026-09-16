@@ -5,14 +5,9 @@
 #include <atomic>
 #include <functional>
 #include <string>
+#include <thread>
 
 namespace moonmic {
-
-struct PacketHeader {
-    uint32_t magic;
-    uint32_t sequence;
-    uint64_t timestamp;
-};
 
 class UDPReceiver {
   public:
@@ -28,8 +23,6 @@ class UDPReceiver {
 
     void setPacketCallback(PacketCallback callback) { packet_callback_ = callback; }
 
-    void receiveLoop();
-
     bool sendTo(const void* data, size_t size, const std::string& ip, uint16_t port);
 
   private:
@@ -39,10 +32,16 @@ class UDPReceiver {
     using socket_t = int;
 #endif
 
-    socket_t socket_fd_;
+    std::atomic<socket_t> socket_fd_;
     std::atomic<bool> running_;
-    void* thread_handle_;
+    std::thread receive_thread_;
     PacketCallback packet_callback_;
+#ifdef _WIN32
+    bool winsock_ready_ = false;
+#endif
+
+    void receiveLoop();
+    void closeSocket();
 };
 
 } // namespace moonmic

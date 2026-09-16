@@ -7,11 +7,6 @@
 #include <cstring>
 
 int main() {
-    static_assert(offsetof(moonmic_packet_header_t, magic) == 0);
-    static_assert(offsetof(moonmic_packet_header_t, sequence) == 4);
-    static_assert(offsetof(moonmic_packet_header_t, timestamp) == 8);
-    static_assert(offsetof(moonmic_packet_header_t, sample_rate) == 16);
-
     std::array<uint8_t, MOONMIC_HEADER_SIZE> header{};
     moonmic_write_packet_header(header.data(), 0xffffffffU, UINT64_MAX, 48000);
 
@@ -32,13 +27,13 @@ int main() {
     hs.display_height = 544;
     hs.flags = MOONMIC_FLAG_FORCE_UPDATE;
 
-    std::array<uint8_t, sizeof(moonmic_handshake_t)> wire{};
+    std::array<uint8_t, MOONMIC_HANDSHAKE_SIZE> wire{};
     moonmic_write_handshake_le(wire.data(), &hs);
     assert(moonmic_read_u32_le(wire.data()) == MOONMIC_HANDSHAKE_MAGIC);
     assert(wire[88] == 0xC0 && wire[89] == 0x03);
 
     moonmic_handshake_t back{};
-    moonmic_read_handshake_le(wire.data(), &back);
+    assert(moonmic_decode_handshake_le(wire.data(), wire.size(), &back));
     assert(back.magic == hs.magic);
     assert(back.version == hs.version);
     assert(back.pair_status == hs.pair_status);
@@ -47,24 +42,28 @@ int main() {
     assert(back.display_width == 960 && back.display_height == 544);
     assert(back.flags == MOONMIC_FLAG_FORCE_UPDATE);
 
-    std::array<uint8_t, sizeof(moonmic_ping_packet_t)> ping{};
+    std::array<uint8_t, MOONMIC_PING_SIZE> ping{};
     moonmic_write_ping_le(ping.data(), MOONMIC_PING_MAGIC, UINT64_C(0x1122334455667788));
     assert(moonmic_read_u32_le(ping.data()) == MOONMIC_PING_MAGIC);
     assert(moonmic_read_ping_timestamp_le(ping.data()) == UINT64_C(0x1122334455667788));
 
-    // Garbage input must decode to values the receiver rejects: no handshake
-    // magic by accident, lengths outside the valid ranges, no crash.
-    std::array<uint8_t, sizeof(moonmic_handshake_t)> junk{};
+    assert(!moonmic_decode_handshake_le(wire.data(), wire.size() - 1, &back));
+
+    auto malformed = wire;
+    malformed[6] = MOONMIC_UNIQUE_ID_CAPACITY + 1;
+    assert(!moonmic_decode_handshake_le(malformed.data(), malformed.size(), &back));
+    malformed = wire;
+    malformed[23] = MOONMIC_DEVICE_NAME_CAPACITY + 1;
+    assert(!moonmic_decode_handshake_le(malformed.data(), malformed.size(), &back));
+
+    std::array<uint8_t, MOONMIC_HANDSHAKE_SIZE> junk{};
     junk.fill(0xFF);
     moonmic_handshake_t junk_hs{};
-    moonmic_read_handshake_le(junk.data(), &junk_hs);
-    assert(junk_hs.magic != MOONMIC_HANDSHAKE_MAGIC);
-    assert(junk_hs.uniqueid_len > 16 && junk_hs.devicename_len > 64);
+    assert(!moonmic_decode_handshake_le(junk.data(), junk.size(), &junk_hs));
 
-    std::array<uint8_t, sizeof(moonmic_handshake_t)> zeros{};
+    std::array<uint8_t, MOONMIC_HANDSHAKE_SIZE> zeros{};
     moonmic_handshake_t zero_hs{};
-    moonmic_read_handshake_le(zeros.data(), &zero_hs);
-    assert(zero_hs.uniqueid_len == 0 && zero_hs.devicename_len == 0);
+    assert(!moonmic_decode_handshake_le(zeros.data(), zeros.size(), &zero_hs));
 
     std::array<uint8_t, MOONMIC_HEADER_SIZE> wrong_magic{};
     assert(moonmic_read_u32_le(wrong_magic.data()) != MOONMIC_MAGIC);

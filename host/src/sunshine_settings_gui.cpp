@@ -1,8 +1,8 @@
+#include "logger.h"
 
 #ifdef USE_IMGUI
 
 #include "sunshine_settings_gui.h"
-#include "sunshine_integration.h"
 #include "sunshine_webui.h"
 #include "config.h"
 #include <imgui.h>
@@ -58,7 +58,7 @@ void SunshineSettingsGUI::render(SunshineWebUI& webui, Config& config) {
 
             if (ImGui::Button("Logout")) {
                 webui.logout();
-                std::cout << "[SunshineSettingsGUI] Logged out from Sunshine Web UI" << std::endl;
+                moonmic::logInfo() << "[SunshineSettingsGUI] Logged out from Sunshine Web UI" << std::endl;
             }
         } else {
             ImGui::TextColored(ImVec4(1, 1, 0, 1), "Not logged in");

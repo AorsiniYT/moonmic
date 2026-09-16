@@ -1,3 +1,4 @@
+#include "logger.h"
 #include "connection_monitor.h"
 #include <iostream>
 #include <chrono>
@@ -29,7 +30,7 @@ ConnectionMonitor::~ConnectionMonitor() {
 
 void ConnectionMonitor::start(const std::string& client_ip, uint16_t port) {
     if (running_) {
-        std::cerr << "[ConnectionMonitor] Already running" << std::endl;
+        moonmic::logError() << "[ConnectionMonitor] Already running" << std::endl;
         return;
     }
 
@@ -38,14 +39,14 @@ void ConnectionMonitor::start(const std::string& client_ip, uint16_t port) {
 
     socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_fd_ == static_cast<intptr_t>(INVALID_SOCKET)) {
-        std::cerr << "[ConnectionMonitor] Failed to create socket" << std::endl;
+        moonmic::logError() << "[ConnectionMonitor] Failed to create socket" << std::endl;
         return;
     }
 
     running_ = true;
     ping_thread_ = std::thread(&ConnectionMonitor::pingThreadFunc, this);
 
-    std::cout << "[ConnectionMonitor] Started pinging " << client_ip << ":" << port << std::endl;
+    moonmic::logInfo() << "[ConnectionMonitor] Started pinging " << client_ip << ":" << port << std::endl;
 }
 
 void ConnectionMonitor::stop() {
@@ -64,12 +65,12 @@ void ConnectionMonitor::stop() {
         socket_fd_ = static_cast<intptr_t>(INVALID_SOCKET);
     }
 
-    std::cout << "[ConnectionMonitor] Stopped" << std::endl;
+    moonmic::logInfo() << "[ConnectionMonitor] Stopped" << std::endl;
 }
 
 void ConnectionMonitor::sendPacket(const void* data, size_t size) {
     if (!running_ || socket_fd_ == static_cast<intptr_t>(INVALID_SOCKET)) {
-        std::cerr << "[ConnectionMonitor] Cannot send packet: not running" << std::endl;
+        moonmic::logError() << "[ConnectionMonitor] Cannot send packet: not running" << std::endl;
         return;
     }
 
@@ -82,7 +83,7 @@ void ConnectionMonitor::sendPacket(const void* data, size_t size) {
     const auto sent = sendto(socket_fd_, (const char*)data, size, 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
     if (sent < 0 || static_cast<size_t>(sent) != size) {
-        std::cerr << "[ConnectionMonitor] Failed to send packet (" << sent << "/" << size << " bytes)" << std::endl;
+        moonmic::logError() << "[ConnectionMonitor] Failed to send packet (" << sent << "/" << size << " bytes)" << std::endl;
     }
 }
 
@@ -94,7 +95,7 @@ void ConnectionMonitor::pingThreadFunc() {
     inet_pton(AF_INET, client_ip_.c_str(), &dest_addr.sin_addr);
 
     while (running_) {
-        uint8_t ping[sizeof(moonmic_ping_packet_t)];
+        uint8_t ping[MOONMIC_PING_SIZE];
 
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
@@ -105,7 +106,7 @@ void ConnectionMonitor::pingThreadFunc() {
             sendto(socket_fd_, (const char*)ping, sizeof(ping), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr));
 
         if (sent != sizeof(ping)) {
-            std::cerr << "[ConnectionMonitor] Failed to send ping" << std::endl;
+            moonmic::logError() << "[ConnectionMonitor] Failed to send ping" << std::endl;
         }
 
         std::this_thread::sleep_for(std::chrono::seconds(2));

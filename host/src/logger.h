@@ -5,9 +5,15 @@
 #include <string>
 #include <mutex>
 #include <filesystem>
-#include <memory>
+#include <sstream>
 
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #elif __linux__
 #include <unistd.h>
@@ -18,6 +24,39 @@ namespace moonmic {
 
 class Logger {
   public:
+    class Line {
+      public:
+        Line(Logger& logger, bool error) : logger_(&logger), error_(error) {}
+        Line(const Line&) = delete;
+        Line& operator=(const Line&) = delete;
+        Line(Line&& other) noexcept : logger_(other.logger_), error_(other.error_), stream_(std::move(other.stream_)) {
+            other.logger_ = nullptr;
+        }
+        ~Line() {
+            if (logger_) logger_->write(stream_.str(), error_);
+        }
+
+        template <typename T> Line& operator<<(const T& value) {
+            stream_ << value;
+            return *this;
+        }
+
+        Line& operator<<(std::ostream& (*manipulator)(std::ostream&)) {
+            manipulator(stream_);
+            return *this;
+        }
+
+        Line& operator<<(std::ios_base& (*manipulator)(std::ios_base&)) {
+            manipulator(stream_);
+            return *this;
+        }
+
+      private:
+        Logger* logger_;
+        bool error_;
+        std::ostringstream stream_;
+    };
+
     static Logger& instance() {
         static Logger instance;
         return instance;
@@ -45,65 +84,55 @@ class Logger {
         return (p / "moonmic.log").string();
     }
 
-    void init() {
-        std::string logPath = getLogPath();
-
-        logFile_.open(logPath, std::ios::out | std::ios::trunc);
-        if (logFile_.is_open()) {
-            original_cout_ = std::cout.rdbuf();
-            original_cerr_ = std::cerr.rdbuf();
-            cout_tee_ = std::make_unique<TeeStreamBuf>(original_cout_, logFile_);
-            cerr_tee_ = std::make_unique<TeeStreamBuf>(original_cerr_, logFile_);
-
-            std::cout.rdbuf(cout_tee_.get());
-            std::cerr.rdbuf(cerr_tee_.get());
-
-            std::cout << "[Logger] Log file opened: " << logPath << std::endl;
-        } else {
-            std::cerr << "[Logger] Failed to open log file: " << logPath << std::endl;
+    bool init(const std::string& logPath = getLogPath()) {
+        bool opened = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (logFile_.is_open()) logFile_.close();
+            logFile_.open(logPath, std::ios::out | std::ios::trunc);
+            opened = logFile_.is_open();
         }
+        if (opened)
+            out() << "[Logger] Log file opened: " << logPath << std::endl;
+        else
+            error() << "[Logger] Failed to open log file: " << logPath << std::endl;
+        return opened;
     }
 
-    ~Logger() {
-        if (logFile_.is_open()) {
-            std::cout.rdbuf(original_cout_);
-            std::cerr.rdbuf(original_cerr_);
-            logFile_.close();
-        }
+    Line out() { return Line(*this, false); }
+    Line error() { return Line(*this, true); }
+
+    void close() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (logFile_.is_open()) logFile_.close();
     }
+
+    ~Logger() { close(); }
 
   private:
     Logger() = default;
 
+    void write(const std::string& message, bool error) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::ostream& console = error ? std::cerr : std::cout;
+        console << message;
+        console.flush();
+        if (logFile_.is_open()) {
+            logFile_ << message;
+            logFile_.flush();
+        }
+    }
+
+    std::mutex mutex_;
     std::ofstream logFile_;
-    std::streambuf* original_cout_ = nullptr;
-    std::streambuf* original_cerr_ = nullptr;
-
-    class TeeStreamBuf : public std::streambuf {
-      public:
-        TeeStreamBuf(std::streambuf* sb1, std::ostream& os2) : sb1_(sb1), os2_(os2) {}
-
-      protected:
-        virtual int overflow(int c) override {
-            if (c == EOF) return !EOF;
-            int const r1 = sb1_->sputc(c);
-            os2_.put(c);
-            return r1;
-        }
-
-        virtual int sync() override {
-            int const r1 = sb1_->pubsync();
-            os2_.flush();
-            return r1;
-        }
-
-      private:
-        std::streambuf* sb1_;
-        std::ostream& os2_;
-    };
-
-    std::unique_ptr<TeeStreamBuf> cout_tee_;
-    std::unique_ptr<TeeStreamBuf> cerr_tee_;
 };
+
+inline Logger::Line logInfo() {
+    return Logger::instance().out();
+}
+
+inline Logger::Line logError() {
+    return Logger::instance().error();
+}
 
 } // namespace moonmic

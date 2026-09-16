@@ -1,5 +1,7 @@
+#include "logger.h"
 #include "sunshine_webui.h"
 #include "config.h"
+#include "sunshine_request.h"
 #include <curl/curl.h>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -17,35 +19,6 @@
 extern bool g_debug_mode;
 
 namespace moonmic {
-
-static std::string base64_encode(const std::string& input) {
-    static const char* base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                      "abcdefghijklmnopqrstuvwxyz"
-                                      "0123456789+/";
-
-    std::string output;
-    int val = 0;
-    int valb = -6;
-
-    for (unsigned char c : input) {
-        val = (val << 8) + c;
-        valb += 8;
-        while (valb >= 0) {
-            output.push_back(base64_chars[(val >> valb) & 0x3F]);
-            valb -= 6;
-        }
-    }
-
-    if (valb > -6) {
-        output.push_back(base64_chars[((val << 8) >> (valb + 8)) & 0x3F]);
-    }
-
-    while (output.size() % 4) {
-        output.push_back('=');
-    }
-
-    return output;
-}
 
 #ifdef _WIN32
 
@@ -80,12 +53,12 @@ static std::string protectPassword(const std::string& plain) {
     in.pbData = reinterpret_cast<BYTE*>(const_cast<char*>(plain.data()));
     in.cbData = static_cast<DWORD>(plain.size());
     if (!CryptProtectData(&in, L"moonmic", NULL, NULL, NULL, 0, &out)) {
-        std::cerr << "[SunshineWebUI] CryptProtectData failed" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] CryptProtectData failed" << std::endl;
         return "";
     }
     std::string blob(reinterpret_cast<char*>(out.pbData), out.cbData);
     LocalFree(out.pbData);
-    return kStoredPasswordPrefix + base64_encode(blob);
+    return kStoredPasswordPrefix + sunshineBase64Encode(blob);
 }
 
 static std::string unprotectPassword(const std::string& stored) {
@@ -115,10 +88,10 @@ SunshineWebUI::SunshineWebUI(Config& config) : config_(config) {
     if (isLoggedIn()) {
         if (refreshClientList()) {
             config_.sunshine.paired = true;
-            std::cout << "[SunshineWebUI] Session validated - auto-login successful" << std::endl;
+            moonmic::logInfo() << "[SunshineWebUI] Session validated - auto-login successful" << std::endl;
         } else {
             config_.sunshine.paired = false;
-            std::cout << "[SunshineWebUI] Session expired, login again" << std::endl;
+            moonmic::logInfo() << "[SunshineWebUI] Session expired, login again" << std::endl;
         }
     }
 }
@@ -138,17 +111,13 @@ std::string SunshineWebUI::generateAuthHeader() const {
         return "";
     }
 
-    std::string credentials = config_.sunshine.webui_username + ":" + password;
-
-    std::string encoded = base64_encode(credentials);
-
-    return "Basic " + encoded;
+    return sunshineBasicAuth(config_.sunshine.webui_username, password);
 }
 
 std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint, const std::string& method,
                                                     const std::string& body) {
     if (!isLoggedIn()) {
-        std::cerr << "[SunshineWebUI] Not logged in" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Not logged in" << std::endl;
         return "";
     }
 
@@ -156,17 +125,17 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
 
     std::string auth_header = generateAuthHeader();
     if (auth_header.empty()) {
-        std::cerr << "[SunshineWebUI] Failed to generate auth header" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Failed to generate auth header" << std::endl;
         return "";
     }
 
     if (g_debug_mode) {
-        std::cout << "[SunshineWebUI] Request: " << method << " " << url << std::endl;
+        moonmic::logInfo() << "[SunshineWebUI] Request: " << method << " " << url << std::endl;
     }
 
     CURL* curl = curl_easy_init();
     if (!curl) {
-        std::cerr << "[SunshineWebUI] Failed to initialize curl" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Failed to initialize curl" << std::endl;
         return "";
     }
 
@@ -187,10 +156,11 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     headers = curl_slist_append(headers, "Content-Type: application/json");
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
-    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    if (!config_.security.ca_path.empty()) {
-        curl_easy_setopt(curl, CURLOPT_CAINFO, config_.security.ca_path.c_str());
+    const auto tls = sunshineTlsOptions(config_.security.ca_path);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, tls.verify_peer);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, tls.verify_host);
+    if (!tls.ca_path.empty()) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, tls.ca_path.c_str());
     }
 
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -206,7 +176,7 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     CURLcode res = curl_easy_perform(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "[SunshineWebUI] curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
+        moonmic::logError() << "[SunshineWebUI] curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
         curl_slist_free_all(headers);
         curl_easy_cleanup(curl);
         return "";
@@ -216,7 +186,7 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
 
     if (g_debug_mode) {
-        std::cout << "[SunshineWebUI] HTTP " << http_code << " - " << response_string.size() << " bytes received"
+        moonmic::logInfo() << "[SunshineWebUI] HTTP " << http_code << " - " << response_string.size() << " bytes received"
                   << std::endl;
     }
 
@@ -224,12 +194,12 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     curl_easy_cleanup(curl);
 
     if (http_code == 401) {
-        std::cerr << "[SunshineWebUI] Authentication failed (401 Unauthorized)" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Authentication failed (401 Unauthorized)" << std::endl;
         return "";
     }
 
     if (http_code != 200) {
-        std::cerr << "[SunshineWebUI] HTTP error: " << http_code << std::endl;
+        moonmic::logError() << "[SunshineWebUI] HTTP error: " << http_code << std::endl;
         return "";
     }
 
@@ -240,17 +210,17 @@ bool SunshineWebUI::restartSunshine() {
 
     std::string response = makeAuthenticatedRequest("/api/restart", "POST", "{}");
     if (response.empty()) {
-        std::cerr << "[SunshineWebUI] Restart request returned empty response (Sunshine likely restarted connection)"
+        moonmic::logError() << "[SunshineWebUI] Restart request returned empty response (Sunshine likely restarted connection)"
                   << std::endl;
 
         return true;
     }
-    std::cout << "[SunshineWebUI] Sunshine restart requested" << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Sunshine restart requested" << std::endl;
     return true;
 }
 
 bool SunshineWebUI::login(const std::string& username, const std::string& password) {
-    std::cout << "[SunshineWebUI] Attempting login for user: " << username << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Attempting login for user: " << username << std::endl;
 
     std::string old_username = config_.sunshine.webui_username;
     std::string old_password = config_.sunshine.webui_password_encrypted;
@@ -280,7 +250,7 @@ bool SunshineWebUI::login(const std::string& username, const std::string& passwo
         session_password_ = old_session_password;
         config_.sunshine.webui_logged_in = old_logged_in;
 
-        std::cerr << "[SunshineWebUI] Login failed - invalid credentials" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Login failed - invalid credentials" << std::endl;
         return false;
     }
 
@@ -300,11 +270,11 @@ bool SunshineWebUI::login(const std::string& username, const std::string& passwo
                 paired_clients_.push_back(client);
             }
 
-            std::cout << "[SunshineWebUI] Login successful - loaded " << paired_clients_.size() << " paired client(s)"
+            moonmic::logInfo() << "[SunshineWebUI] Login successful - loaded " << paired_clients_.size() << " paired client(s)"
                       << std::endl;
         }
     } catch (const std::exception& e) {
-        std::cerr << "[SunshineWebUI] Error parsing client list: " << e.what() << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Error parsing client list: " << e.what() << std::endl;
     }
 
     return true;
@@ -324,7 +294,7 @@ void SunshineWebUI::logout() {
 
     saveCredentials();
 
-    std::cout << "[SunshineWebUI] Logged out" << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Logged out" << std::endl;
 }
 
 std::vector<WebUIPairedClient> SunshineWebUI::getPairedClients() {
@@ -342,12 +312,12 @@ bool SunshineWebUI::refreshClientList() {
         return false;
     }
 
-    std::cout << "[SunshineWebUI] Refreshing client list..." << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Refreshing client list..." << std::endl;
 
     std::string response = makeAuthenticatedRequest("/api/clients/list");
 
     if (response.empty()) {
-        std::cerr << "[SunshineWebUI] Failed to refresh client list" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Failed to refresh client list" << std::endl;
         return false;
     }
 
@@ -364,11 +334,11 @@ bool SunshineWebUI::refreshClientList() {
                 paired_clients_.push_back(client);
             }
 
-            std::cout << "[SunshineWebUI] Loaded " << paired_clients_.size() << " paired client(s)" << std::endl;
+            moonmic::logInfo() << "[SunshineWebUI] Loaded " << paired_clients_.size() << " paired client(s)" << std::endl;
         }
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "[SunshineWebUI] Error parsing client list: " << e.what() << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Error parsing client list: " << e.what() << std::endl;
         return false;
     }
 }
@@ -377,21 +347,21 @@ void SunshineWebUI::saveCredentials() {
 
     config_.save(Config::getDefaultConfigPath());
 
-    std::cout << "[SunshineWebUI] Credentials saved" << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Credentials saved" << std::endl;
 }
 
 bool SunshineWebUI::setDisplayResolution(uint16_t target_width, uint16_t target_height) {
     if (!isLoggedIn()) {
-        std::cerr << "[SunshineWebUI] Not logged in - cannot set resolution" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Not logged in - cannot set resolution" << std::endl;
         return false;
     }
 
     std::string target_res = std::to_string(target_width) + "x" + std::to_string(target_height);
-    std::cout << "[SunshineWebUI] Verifying display resolution: 960x544 -> " << target_res << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Verifying display resolution: 960x544 -> " << target_res << std::endl;
 
     std::string current_config_str = makeAuthenticatedRequest("/api/config");
     if (current_config_str.empty()) {
-        std::cerr << "[SunshineWebUI] Failed to get current config for verification. Aborting update to prevent "
+        moonmic::logError() << "[SunshineWebUI] Failed to get current config for verification. Aborting update to prevent "
                      "restart loops."
                   << std::endl;
         return false;
@@ -410,11 +380,11 @@ bool SunshineWebUI::setDisplayResolution(uint16_t target_width, uint16_t target_
                         if (entry.value("requested_resolution", "") == "960x544") {
 
                             if (entry.value("final_resolution", "") == target_res) {
-                                std::cout << "[SunshineWebUI] Resolution already set to " << target_res
+                                moonmic::logInfo() << "[SunshineWebUI] Resolution already set to " << target_res
                                           << " - Skipping update/restart" << std::endl;
                                 return true;
                             } else {
-                                std::cout << "[SunshineWebUI] Found existing mapping but different resolution: "
+                                moonmic::logInfo() << "[SunshineWebUI] Found existing mapping but different resolution: "
                                           << entry.value("final_resolution", "") << " (wanted " << target_res << ")"
                                           << std::endl;
                             }
@@ -423,7 +393,7 @@ bool SunshineWebUI::setDisplayResolution(uint16_t target_width, uint16_t target_
                 }
             }
         } catch (const std::exception& e) {
-            std::cerr << "[SunshineWebUI] Error parsing current config: " << e.what() << std::endl;
+            moonmic::logError() << "[SunshineWebUI] Error parsing current config: " << e.what() << std::endl;
         }
     }
 
@@ -445,18 +415,18 @@ bool SunshineWebUI::setDisplayResolution(uint16_t target_width, uint16_t target_
     config["dd_mode_remapping"] = remapping_str;
     config["dd_configuration_option"] = "ensure_active";
 
-    std::cout << "[SunshineWebUI] Applying new resolution config..." << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Applying new resolution config..." << std::endl;
 
     std::string config_json = config.dump();
     std::string response = makeAuthenticatedRequest("/api/config", "POST", config_json);
 
     if (response.empty()) {
-        std::cerr << "[SunshineWebUI] Failed to save config" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Failed to save config" << std::endl;
         return false;
     }
 
-    std::cout << "[SunshineWebUI] Config save response: " << response << std::endl;
-    std::cout << "[SunshineWebUI] Display resolution configured: 960x544 -> " << target_res << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Config save response: " << response << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Display resolution configured: 960x544 -> " << target_res << std::endl;
     return true;
 }
 
@@ -491,15 +461,15 @@ bool SunshineWebUI::getCurrentResolution(uint16_t& width, uint16_t& height) {
 
 bool SunshineWebUI::clearDisplayResolution() {
     if (!isLoggedIn()) {
-        std::cerr << "[SunshineWebUI] Not logged in - cannot clear resolution" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Not logged in - cannot clear resolution" << std::endl;
         return false;
     }
 
-    std::cout << "[SunshineWebUI] Clearing display resolution remapping" << std::endl;
+    moonmic::logInfo() << "[SunshineWebUI] Clearing display resolution remapping" << std::endl;
 
     std::string current_config = makeAuthenticatedRequest("/api/config");
     if (current_config.empty()) {
-        std::cerr << "[SunshineWebUI] Failed to get current config" << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Failed to get current config" << std::endl;
         return false;
     }
 
@@ -522,19 +492,19 @@ bool SunshineWebUI::clearDisplayResolution() {
             std::string response = makeAuthenticatedRequest("/api/config", "POST", updated_config);
 
             if (response.empty()) {
-                std::cerr << "[SunshineWebUI] Failed to save cleared config" << std::endl;
+                moonmic::logError() << "[SunshineWebUI] Failed to save cleared config" << std::endl;
                 return false;
             }
 
-            std::cout << "[SunshineWebUI] Display resolution mapping cleared" << std::endl;
+            moonmic::logInfo() << "[SunshineWebUI] Display resolution mapping cleared" << std::endl;
             return true;
         }
 
-        std::cout << "[SunshineWebUI] No resolution remapping to clear" << std::endl;
+        moonmic::logInfo() << "[SunshineWebUI] No resolution remapping to clear" << std::endl;
         return true;
 
     } catch (const std::exception& e) {
-        std::cerr << "[SunshineWebUI] Error clearing resolution: " << e.what() << std::endl;
+        moonmic::logError() << "[SunshineWebUI] Error clearing resolution: " << e.what() << std::endl;
         return false;
     }
 }

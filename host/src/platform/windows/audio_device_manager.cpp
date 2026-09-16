@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include <initguid.h>
 #include "audio_device_manager.h"
@@ -21,20 +22,20 @@ AudioDeviceManager::~AudioDeviceManager() {
 bool AudioDeviceManager::initializeCOM() {
     HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
     if (FAILED(hr) && hr != RPC_E_CHANGED_MODE) {
-        std::cerr << "[AudioDeviceManager] CoInitialize failed" << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] CoInitialize failed" << std::endl;
         return false;
     }
 
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
                           (void**)&enumerator_);
     if (FAILED(hr)) {
-        std::cerr << "[AudioDeviceManager] Failed to create device enumerator" << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] Failed to create device enumerator" << std::endl;
         return false;
     }
 
     hr = CoCreateInstance(CLSID_CPolicyConfigClient, NULL, CLSCTX_ALL, IID_IPolicyConfig, (void**)&policy_config_);
     if (FAILED(hr)) {
-        std::cerr << "[AudioDeviceManager] Failed to create IPolicyConfig (Windows 10+ required)" << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] Failed to create IPolicyConfig (Windows 10+ required)" << std::endl;
     }
 
     return true;
@@ -56,7 +57,7 @@ std::vector<AudioDeviceInfo> AudioDeviceManager::enumerateRecordingDevices() {
     std::vector<AudioDeviceInfo> devices;
 
     if (!enumerator_) {
-        std::cerr << "[AudioDeviceManager] Enumerator not initialized" << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] Enumerator not initialized" << std::endl;
         return devices;
     }
 
@@ -76,7 +77,7 @@ std::vector<AudioDeviceInfo> AudioDeviceManager::enumerateRecordingDevices() {
     IMMDeviceCollection* collection = nullptr;
     hr = enumerator_->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection);
     if (FAILED(hr)) {
-        std::cerr << "[AudioDeviceManager] EnumAudioEndpoints failed" << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] EnumAudioEndpoints failed" << std::endl;
         return devices;
     }
 
@@ -169,7 +170,7 @@ AudioDeviceInfo AudioDeviceManager::getCurrentDefaultRecordingDevice() {
 
 bool AudioDeviceManager::setDefaultRecordingDevice(const std::string& device_id) {
     if (!policy_config_) {
-        std::cerr << "[AudioDeviceManager] IPolicyConfig not available" << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] IPolicyConfig not available" << std::endl;
         return false;
     }
 
@@ -179,14 +180,14 @@ bool AudioDeviceManager::setDefaultRecordingDevice(const std::string& device_id)
 
     HRESULT hr = policy_config_->SetDefaultEndpoint(wid.c_str(), eConsole);
     if (FAILED(hr)) {
-        std::cerr << "[AudioDeviceManager] SetDefaultEndpoint failed: " << hr << std::endl;
+        moonmic::logError() << "[AudioDeviceManager] SetDefaultEndpoint failed: " << hr << std::endl;
         return false;
     }
 
     policy_config_->SetDefaultEndpoint(wid.c_str(), eMultimedia);
     policy_config_->SetDefaultEndpoint(wid.c_str(), eCommunications);
 
-    std::cout << "[AudioDeviceManager] Changed default recording device" << std::endl;
+    moonmic::logInfo() << "[AudioDeviceManager] Changed default recording device" << std::endl;
     return true;
 }
 
@@ -277,7 +278,7 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
                         }
 
                         found = true;
-                        std::cout << "[AudioDeviceManager] Native format for '" << device_name
+                        moonmic::logInfo() << "[AudioDeviceManager] Native format for '" << device_name
                                   << "': " << out_format.sample_rate << "Hz, " << out_format.channels << "ch, "
                                   << out_format.bits_per_sample << "-bit "
                                   << (out_format.is_float ? "(float)" : "(int)") << std::endl;

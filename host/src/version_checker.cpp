@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "version_checker.h"
 #include "version.h"
@@ -44,7 +45,7 @@ int VersionChecker::compareVersions(const std::string& v1, const std::string& v2
 bool VersionChecker::fetchLatestRelease(std::string& version, std::string& download_url) {
     CURL* curl = curl_easy_init();
     if (!curl) {
-        std::cerr << "[VersionChecker] Failed to initialize curl" << std::endl;
+        moonmic::logError() << "[VersionChecker] Failed to initialize curl" << std::endl;
         return false;
     }
 
@@ -67,17 +68,17 @@ bool VersionChecker::fetchLatestRelease(std::string& version, std::string& downl
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK) {
-        std::cerr << "[VersionChecker] Version fetch failed: " << curl_easy_strerror(res) << std::endl;
+        moonmic::logError() << "[VersionChecker] Version fetch failed: " << curl_easy_strerror(res) << std::endl;
         return false;
     }
     if (response_code != 200) {
-        std::cerr << "[VersionChecker] Release request returned HTTP " << response_code << std::endl;
+        moonmic::logError() << "[VersionChecker] Release request returned HTTP " << response_code << std::endl;
         return false;
     }
 
     const auto release = nlohmann::json::parse(result, nullptr, false);
     if (release.is_discarded() || !release.contains("tag_name") || !release["tag_name"].is_string()) {
-        std::cerr << "[VersionChecker] Release response did not contain a valid tag" << std::endl;
+        moonmic::logError() << "[VersionChecker] Release response did not contain a valid tag" << std::endl;
         return false;
     }
 
@@ -86,7 +87,7 @@ bool VersionChecker::fetchLatestRelease(std::string& version, std::string& downl
         version.erase(version.begin());
     }
     if (!parseVersion(version)) {
-        std::cerr << "[VersionChecker] Release tag is not a semantic version: " << version << std::endl;
+        moonmic::logError() << "[VersionChecker] Release tag is not a semantic version: " << version << std::endl;
         return false;
     }
 

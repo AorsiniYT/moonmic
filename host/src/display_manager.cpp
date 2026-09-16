@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "display_manager.h"
 #include <iostream>
@@ -29,7 +30,7 @@ DisplayManager::Resolution DisplayManager::getCurrentResolution() {
 }
 
 bool DisplayManager::setResolution(int, int, int) {
-    std::cout << "[DisplayManager] setResolution skipped (OS resolution changes disabled)" << std::endl;
+    moonmic::logInfo() << "[DisplayManager] setResolution skipped (OS resolution changes disabled)" << std::endl;
     return false;
 }
 
@@ -38,7 +39,7 @@ bool DisplayManager::restoreOriginalResolution() {
         return true;
     }
 
-    std::cout << "[DisplayManager] Restoring original resolution: " << original_resolution_.width << "x"
+    moonmic::logInfo() << "[DisplayManager] Restoring original resolution: " << original_resolution_.width << "x"
               << original_resolution_.height << "@" << original_resolution_.refresh_rate << "Hz" << std::endl;
 
     bool success =
@@ -75,7 +76,7 @@ bool DisplayManager::setResolutionWindows(int width, int height, int refresh_rat
     if (result == DISP_CHANGE_SUCCESSFUL) {
         return true;
     } else {
-        std::cerr << "[DisplayManager] ChangeDisplaySettings failed with code: " << result << std::endl;
+        moonmic::logError() << "[DisplayManager] ChangeDisplaySettings failed with code: " << result << std::endl;
         return false;
     }
 }

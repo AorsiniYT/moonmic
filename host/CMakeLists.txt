@@ -34,11 +34,11 @@ set(SOURCES
     src/codec/ffmpeg_decoder.cpp
     src/network/udp_receiver.cpp
     src/network/connection_monitor.cpp
-    src/sunshine_integration.cpp
     src/config.cpp
     src/main.cpp
     src/audio_receiver.cpp
     src/sunshine_webui.cpp
+    src/sunshine_request.cpp
     src/single_instance.cpp
     src/display_manager.cpp
     src/version_checker.cpp
@@ -398,6 +398,29 @@ if(MOONMIC_HOST_BUILD_TESTS)
         target_link_libraries(moonmic-config-test PRIVATE shell32)
     endif()
     add_test(NAME config-roundtrip COMMAND moonmic-config-test)
+
+    add_executable(moonmic-udp-lifecycle-test
+        tests/udp_lifecycle_test.cpp
+        src/network/udp_receiver.cpp
+    )
+    target_include_directories(moonmic-udp-lifecycle-test PRIVATE src)
+    target_link_libraries(moonmic-udp-lifecycle-test PRIVATE Threads::Threads)
+    if(WIN32)
+        target_link_libraries(moonmic-udp-lifecycle-test PRIVATE ws2_32)
+    endif()
+    add_test(NAME udp-start-stop-restart COMMAND moonmic-udp-lifecycle-test)
+
+    add_executable(moonmic-sunshine-request-test
+        tests/sunshine_request_test.cpp
+        src/sunshine_request.cpp
+    )
+    target_include_directories(moonmic-sunshine-request-test PRIVATE src)
+    add_test(NAME sunshine-tls-auth COMMAND moonmic-sunshine-request-test)
+
+    add_executable(moonmic-logger-test tests/logger_test.cpp)
+    target_include_directories(moonmic-logger-test PRIVATE src)
+    target_link_libraries(moonmic-logger-test PRIVATE Threads::Threads)
+    add_test(NAME logger-concurrent-writes COMMAND moonmic-logger-test)
 endif()
 
 install(TARGETS moonmic-host DESTINATION ${CMAKE_INSTALL_BINDIR})

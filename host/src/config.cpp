@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "config.h"
 #include <fstream>
@@ -34,7 +35,7 @@ static std::string validateConfig(const Config& config) {
 bool Config::load(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        std::cerr << "[Config] File not found: " << path << std::endl;
+        moonmic::logError() << "[Config] File not found: " << path << std::endl;
         return false;
     }
 
@@ -42,12 +43,12 @@ bool Config::load(const std::string& path) {
         nlohmann::json j;
         file >> j;
         if (!j.is_object()) {
-            std::cerr << "[Config] Root value must be an object" << std::endl;
+            moonmic::logError() << "[Config] Root value must be an object" << std::endl;
             return false;
         }
         for (const char* section : {"server", "audio", "security", "sunshine"}) {
             if (j.contains(section) && !j.at(section).is_object()) {
-                std::cerr << "[Config] " << section << " must be an object" << std::endl;
+                moonmic::logError() << "[Config] " << section << " must be an object" << std::endl;
                 return false;
             }
         }
@@ -108,15 +109,15 @@ bool Config::load(const std::string& path) {
 
         const std::string error = validateConfig(candidate);
         if (!error.empty()) {
-            std::cerr << "[Config] Invalid configuration: " << error << std::endl;
+            moonmic::logError() << "[Config] Invalid configuration: " << error << std::endl;
             return false;
         }
 
         *this = std::move(candidate);
-        std::cout << "[Config] Loaded from: " << path << std::endl;
+        moonmic::logInfo() << "[Config] Loaded from: " << path << std::endl;
         return true;
     } catch (const nlohmann::json::exception& e) {
-        std::cerr << "[Config] Error loading: " << e.what() << std::endl;
+        moonmic::logError() << "[Config] Error loading: " << e.what() << std::endl;
         return false;
     }
 }
@@ -124,7 +125,7 @@ bool Config::load(const std::string& path) {
 bool Config::save(const std::string& path) {
     const std::string error = validateConfig(*this);
     if (!error.empty()) {
-        std::cerr << "[Config] Cannot save invalid configuration: " << error << std::endl;
+        moonmic::logError() << "[Config] Cannot save invalid configuration: " << error << std::endl;
         return false;
     }
 
@@ -155,19 +156,19 @@ bool Config::save(const std::string& path) {
 
         std::ofstream file(path);
         if (!file.is_open()) {
-            std::cerr << "[Config] Cannot write to: " << path << std::endl;
+            moonmic::logError() << "[Config] Cannot write to: " << path << std::endl;
             return false;
         }
 
         file << j.dump(2);
         if (!file.good()) {
-            std::cerr << "[Config] Failed while writing: " << path << std::endl;
+            moonmic::logError() << "[Config] Failed while writing: " << path << std::endl;
             return false;
         }
-        std::cout << "[Config] Saved to: " << path << std::endl;
+        moonmic::logInfo() << "[Config] Saved to: " << path << std::endl;
         return true;
     } catch (const nlohmann::json::exception& e) {
-        std::cerr << "[Config] Error saving: " << e.what() << std::endl;
+        moonmic::logError() << "[Config] Error saving: " << e.what() << std::endl;
         return false;
     }
 }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -9,6 +10,13 @@ extern "C" {
 #define MOONMIC_MAGIC 0x4D4D4943
 #define MOONMIC_RAW_FLAG 0x80000000
 #define MOONMIC_HEADER_SIZE 20
+#define MOONMIC_HANDSHAKE_SIZE 93
+#define MOONMIC_CONTROL_SIZE 8
+#define MOONMIC_PING_SIZE 12
+#define MOONMIC_FOCUS_REQUEST_SIZE 32
+#define MOONMIC_FOCUS_RESPONSE_SIZE 20
+#define MOONMIC_UNIQUE_ID_CAPACITY 16
+#define MOONMIC_DEVICE_NAME_CAPACITY 64
 
 #define MOONMIC_HANDSHAKE_MAGIC 0x4D4F4F4E
 #define MOONMIC_HANDSHAKE_ACK 0x4B434148
@@ -75,15 +83,14 @@ typedef enum {
     MOONMIC_FOCUS_SOURCE_POINTER = 2
 } moonmic_focus_source_t;
 
-#pragma pack(push, 1)
 typedef struct {
     uint32_t magic;
     uint8_t version;
     uint8_t pair_status;
     uint8_t uniqueid_len;
-    char uniqueid[16];
+    char uniqueid[MOONMIC_UNIQUE_ID_CAPACITY];
     uint8_t devicename_len;
-    char devicename[64];
+    char devicename[MOONMIC_DEVICE_NAME_CAPACITY];
     uint16_t display_width;
     uint16_t display_height;
     uint8_t flags;
@@ -112,7 +119,7 @@ typedef struct {
     uint8_t pair_status;
     uint8_t uniqueid_len;
     uint8_t reserved;
-    char uniqueid[16];
+    char uniqueid[MOONMIC_UNIQUE_ID_CAPACITY];
     uint32_t request_id;
     uint32_t reserved_word;
 } moonmic_focus_request_t;
@@ -127,19 +134,17 @@ typedef struct {
     uint32_t request_id;
     uint32_t reserved_word;
 } moonmic_focus_response_t;
-#pragma pack(pop)
-
-#ifdef __cplusplus
-}
 
 static inline void moonmic_read_handshake_le(const uint8_t* data, moonmic_handshake_t* hs) {
     hs->magic = moonmic_read_u32_le(data);
     hs->version = data[4];
     hs->pair_status = data[5];
     hs->uniqueid_len = data[6];
-    for (int i = 0; i < 16; ++i) hs->uniqueid[i] = (char)data[7 + i];
+    for (int i = 0; i < MOONMIC_UNIQUE_ID_CAPACITY; ++i)
+        hs->uniqueid[i] = (char)data[7 + i];
     hs->devicename_len = data[23];
-    for (int i = 0; i < 64; ++i) hs->devicename[i] = (char)data[24 + i];
+    for (int i = 0; i < MOONMIC_DEVICE_NAME_CAPACITY; ++i)
+        hs->devicename[i] = (char)data[24 + i];
     hs->display_width = moonmic_read_u16_le(data + 88);
     hs->display_height = moonmic_read_u16_le(data + 90);
     hs->flags = data[92];
@@ -150,9 +155,11 @@ static inline void moonmic_write_handshake_le(uint8_t* data, const moonmic_hands
     data[4] = hs->version;
     data[5] = hs->pair_status;
     data[6] = hs->uniqueid_len;
-    for (int i = 0; i < 16; ++i) data[7 + i] = (uint8_t)hs->uniqueid[i];
+    for (int i = 0; i < MOONMIC_UNIQUE_ID_CAPACITY; ++i)
+        data[7 + i] = (uint8_t)hs->uniqueid[i];
     data[23] = hs->devicename_len;
-    for (int i = 0; i < 64; ++i) data[24 + i] = (uint8_t)hs->devicename[i];
+    for (int i = 0; i < MOONMIC_DEVICE_NAME_CAPACITY; ++i)
+        data[24 + i] = (uint8_t)hs->devicename[i];
     moonmic_write_u16_le(data + 88, hs->display_width);
     moonmic_write_u16_le(data + 90, hs->display_height);
     data[92] = hs->flags;
@@ -178,7 +185,8 @@ static inline void moonmic_read_focus_request_le(const uint8_t* data, moonmic_fo
     request->pair_status = data[5];
     request->uniqueid_len = data[6];
     request->reserved = data[7];
-    for (int i = 0; i < 16; ++i) request->uniqueid[i] = (char)data[8 + i];
+    for (int i = 0; i < MOONMIC_UNIQUE_ID_CAPACITY; ++i)
+        request->uniqueid[i] = (char)data[8 + i];
     request->request_id = moonmic_read_u32_le(data + 24);
     request->reserved_word = moonmic_read_u32_le(data + 28);
 }
@@ -194,10 +202,13 @@ static inline void moonmic_write_focus_response_le(uint8_t* data, const moonmic_
     moonmic_write_u32_le(data + 16, response->reserved_word);
 }
 
-static_assert(sizeof(moonmic_handshake_t) == 93, "Unexpected Moonmic handshake size");
-static_assert(sizeof(moonmic_packet_header_t) == MOONMIC_HEADER_SIZE, "Unexpected Moonmic packet header size");
-static_assert(sizeof(moonmic_control_packet_t) == 8, "Unexpected Moonmic control packet size");
-static_assert(sizeof(moonmic_ping_packet_t) == 12, "Unexpected Moonmic ping packet size");
-static_assert(sizeof(moonmic_focus_request_t) == 32, "Unexpected Moonmic focus request size");
-static_assert(sizeof(moonmic_focus_response_t) == 20, "Unexpected Moonmic focus response size");
+static inline int moonmic_decode_handshake_le(const uint8_t* data, size_t size, moonmic_handshake_t* hs) {
+    if (!data || !hs || size < MOONMIC_HANDSHAKE_SIZE) return 0;
+    moonmic_read_handshake_le(data, hs);
+    return hs->magic == MOONMIC_HANDSHAKE_MAGIC && hs->uniqueid_len <= MOONMIC_UNIQUE_ID_CAPACITY &&
+           hs->devicename_len <= MOONMIC_DEVICE_NAME_CAPACITY;
+}
+
+#ifdef __cplusplus
+}
 #endif

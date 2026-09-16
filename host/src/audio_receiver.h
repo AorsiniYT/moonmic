@@ -4,13 +4,11 @@
 #include "config.h"
 #include "audio_resampler.h"
 #include "moonmic_protocol.h"
-#include "sunshine_integration.h"
 #include "sunshine_webui.h"
 #include "codec/ffmpeg_decoder.h"
 #include "network/udp_receiver.h"
 #include "network/connection_monitor.h"
 #include "platform/virtual_device.h"
-#include "display_manager.h"
 #include <memory>
 #include <string>
 #include <atomic>
@@ -38,7 +36,6 @@ class AudioReceiver {
     bool switchAudioOutput(bool use_speakers);
 
     void setSunshineWebUI(SunshineWebUI* webui) { sunshine_webui_ = webui; }
-    void setDisplayManager(DisplayManager* display_mgr) { display_manager_ = display_mgr; }
 
     struct Stats {
         uint64_t packets_received = 0;
@@ -70,9 +67,7 @@ class AudioReceiver {
     void sendControlSignalInternal(uint32_t signal_magic);
 
     Config config_;
-    std::unique_ptr<SunshineIntegration> sunshine_;
     SunshineWebUI* sunshine_webui_ = nullptr;
-    DisplayManager* display_manager_ = nullptr; // Optional direct display control fallback
     std::unique_ptr<FFmpegDecoder> decoder_;
     AudioResampler resampler_;
     std::unique_ptr<UDPReceiver> receiver_;
@@ -85,7 +80,6 @@ class AudioReceiver {
     Stats stats_;
 
     bool client_validated_;
-    std::string client_uniqueid_;
     std::string client_devicename_;
     std::string last_validated_ip_;
 

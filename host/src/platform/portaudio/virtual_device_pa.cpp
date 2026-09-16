@@ -1,3 +1,4 @@
+#include "logger.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -24,9 +25,9 @@ namespace moonmic {
 VirtualDevicePortAudio::VirtualDevicePortAudio() {
     PaError err = Pa_Initialize();
     if (err != paNoError) {
-        std::cerr << "[PortAudio] Initialize failed: " << Pa_GetErrorText(err) << std::endl;
+        moonmic::logError() << "[PortAudio] Initialize failed: " << Pa_GetErrorText(err) << std::endl;
     } else {
-        std::cout << "[PortAudio] Library initialized." << std::endl;
+        moonmic::logInfo() << "[PortAudio] Library initialized." << std::endl;
     }
 }
 
@@ -53,18 +54,18 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
 
     int numDevices = Pa_GetDeviceCount();
     if (numDevices < 0) {
-        std::cerr << "[PortAudio] No devices found." << std::endl;
+        moonmic::logError() << "[PortAudio] No devices found." << std::endl;
         return false;
     }
 
     int outputDeviceIndex = -1;
     bool found_ks = false;
 
-    std::cout << "[PortAudio] Searching for device containing: '" << device_name << "'" << std::endl;
+    moonmic::logInfo() << "[PortAudio] Searching for device containing: '" << device_name << "'" << std::endl;
 
     if (device_name.empty()) {
         outputDeviceIndex = Pa_GetDefaultOutputDevice();
-        std::cout << "[PortAudio] No device name specified. Using system default output." << std::endl;
+        moonmic::logInfo() << "[PortAudio] No device name specified. Using system default output." << std::endl;
     } else {
         for (int i = 0; i < numDevices; i++) {
             const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i);
@@ -83,7 +84,7 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
                 if (name.find("Steam") != std::string::npos && name.find("Microphone") != std::string::npos) {
 
                     name_match = true;
-                    std::cout << "[PortAudio] Matched Steam Microphone output endpoint: " << name << std::endl;
+                    moonmic::logInfo() << "[PortAudio] Matched Steam Microphone output endpoint: " << name << std::endl;
                 }
             }
 
@@ -91,12 +92,12 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
                 if (name.find("CABLE Input") != std::string::npos ||
                     name.find("Input (VB-Audio") != std::string::npos) {
                     name_match = true;
-                    std::cout << "[PortAudio] Matched VB-Cable playback endpoint: " << name << std::endl;
+                    moonmic::logInfo() << "[PortAudio] Matched VB-Cable playback endpoint: " << name << std::endl;
                 }
             }
 
             if (name_match) {
-                std::cout << "  [" << i << "] Found: " << name << " (" << apiName << ")" << std::endl;
+                moonmic::logInfo() << "  [" << i << "] Found: " << name << " (" << apiName << ")" << std::endl;
 
                 // WDM-KS requires high sample rates for Steam (96000Hz/88200Hz)
 
@@ -106,7 +107,7 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
                 if (is_ks) {
                     outputDeviceIndex = i;
                     found_ks = true;
-                    std::cout << "      >>> Selected as best candidate (WDM-KS)!" << std::endl;
+                    moonmic::logInfo() << "      >>> Selected as best candidate (WDM-KS)!" << std::endl;
                     break;
                 } else if (is_wasapi && !found_ks) {
                     outputDeviceIndex = i;
@@ -122,15 +123,15 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
 
         if (device_name.empty()) {
             outputDeviceIndex = Pa_GetDefaultOutputDevice();
-            std::cout << "[PortAudio] No device name specified. Using system default output." << std::endl;
+            moonmic::logInfo() << "[PortAudio] No device name specified. Using system default output." << std::endl;
         } else {
-            std::cerr << "[PortAudio] Could not find output device matching: " << device_name << std::endl;
+            moonmic::logError() << "[PortAudio] Could not find output device matching: " << device_name << std::endl;
             return false;
         }
     }
 
     const PaDeviceInfo* finalDeviceInfo = Pa_GetDeviceInfo(outputDeviceIndex);
-    std::cout << "[PortAudio] Opening stream on device: " << finalDeviceInfo->name << " ("
+    moonmic::logInfo() << "[PortAudio] Opening stream on device: " << finalDeviceInfo->name << " ("
               << Pa_GetHostApiInfo(finalDeviceInfo->hostApi)->name << ")" << std::endl;
 
     const PaHostApiInfo* selectedHostApi = Pa_GetHostApiInfo(finalDeviceInfo->hostApi);
@@ -140,7 +141,7 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
     int output_channels = channels;
     if (using_wdmks && channels == 1) {
         output_channels = 2;
-        std::cout << "[PortAudio] WDM-KS detected: converting mono to stereo (2ch)" << std::endl;
+        moonmic::logInfo() << "[PortAudio] WDM-KS detected: converting mono to stereo (2ch)" << std::endl;
     }
 
     channels_ = output_channels;
@@ -152,7 +153,7 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
 
     if (using_wdmks) {
         outputParameters.suggestedLatency = finalDeviceInfo->defaultHighOutputLatency;
-        std::cout << "[PortAudio] WDM-KS: Using High Output Latency: " << outputParameters.suggestedLatency << "s"
+        moonmic::logInfo() << "[PortAudio] WDM-KS: Using High Output Latency: " << outputParameters.suggestedLatency << "s"
                   << std::endl;
     } else {
         outputParameters.suggestedLatency = finalDeviceInfo->defaultLowOutputLatency;
@@ -185,7 +186,7 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
                 is_float_ = true;
             }
 
-            std::cout << "[PortAudio] Precise WASAPI format: " << target_rate << "Hz, " << target_channels << "ch, "
+            moonmic::logInfo() << "[PortAudio] Precise WASAPI format: " << target_rate << "Hz, " << target_channels << "ch, "
                       << (is_float_ ? "Float32" : "Int16") << std::endl;
         }
     }
@@ -207,7 +208,7 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
 
     unsigned long frames_per_buffer = using_wdmks ? 1024 : paFramesPerBufferUnspecified;
     if (using_wdmks) {
-        std::cout << "[PortAudio] WDM-KS: using explicit buffer size (1024 frames)" << std::endl;
+        moonmic::logInfo() << "[PortAudio] WDM-KS: using explicit buffer size (1024 frames)" << std::endl;
     }
 
     PaError err = Pa_OpenStream(&stream_, NULL, &outputParameters, (double)target_rate, frames_per_buffer, paNoFlag,
@@ -216,31 +217,31 @@ bool VirtualDevicePortAudio::init(const std::string& device_name, int sample_rat
     if (err == paNoError) {
         actual_sample_rate_ = target_rate;
     } else {
-        std::cerr << "[PortAudio] Fatal: Could not open stream with precise format: " << Pa_GetErrorText(err)
+        moonmic::logError() << "[PortAudio] Fatal: Could not open stream with precise format: " << Pa_GetErrorText(err)
                   << std::endl;
         stream_ = nullptr;
         return false;
     }
 
     if (actual_sample_rate_ != source_sample_rate_) {
-        std::cout << "[PortAudio] Resampling required: " << source_sample_rate_ << "Hz -> " << actual_sample_rate_
+        moonmic::logInfo() << "[PortAudio] Resampling required: " << source_sample_rate_ << "Hz -> " << actual_sample_rate_
                   << "Hz" << std::endl;
         int resampler_err;
         resampler_ = speex_resampler_init(target_channels, source_sample_rate_, actual_sample_rate_, 3, &resampler_err);
         if (!resampler_) {
-            std::cerr << "[PortAudio] Failed to initialize Speex resampler: " << resampler_err << std::endl;
+            moonmic::logError() << "[PortAudio] Failed to initialize Speex resampler: " << resampler_err << std::endl;
         }
     }
 
     err = Pa_StartStream(stream_);
     if (err != paNoError) {
-        std::cerr << "[PortAudio] StartStream failed: " << Pa_GetErrorText(err) << std::endl;
+        moonmic::logError() << "[PortAudio] StartStream failed: " << Pa_GetErrorText(err) << std::endl;
         Pa_CloseStream(stream_);
         stream_ = nullptr;
         return false;
     }
 
-    std::cout << "[PortAudio] Stream started successfully @ " << actual_sample_rate_ << "Hz (" << target_channels
+    moonmic::logInfo() << "[PortAudio] Stream started successfully @ " << actual_sample_rate_ << "Hz (" << target_channels
               << "ch)" << std::endl;
     return true;
 }

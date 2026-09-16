@@ -1,6 +1,6 @@
+#include "logger.h"
 
 #include "ffmpeg_decoder.h"
-
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
@@ -47,13 +47,13 @@ bool FFmpegDecoder::init(int sample_rate, int channels) {
 
     codec_ = avcodec_find_decoder(AV_CODEC_ID_OPUS);
     if (!codec_) {
-        std::cerr << "[FFmpegDecoder] Opus codec not found" << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Opus codec not found" << std::endl;
         return false;
     }
 
     codec_ctx_ = avcodec_alloc_context3(codec_);
     if (!codec_ctx_) {
-        std::cerr << "[FFmpegDecoder] Failed to allocate codec context" << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Failed to allocate codec context" << std::endl;
         return false;
     }
 
@@ -70,7 +70,7 @@ bool FFmpegDecoder::init(int sample_rate, int channels) {
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        std::cerr << "[FFmpegDecoder] Failed to open codec: " << errbuf << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Failed to open codec: " << errbuf << std::endl;
         cleanup();
         return false;
     }
@@ -78,14 +78,14 @@ bool FFmpegDecoder::init(int sample_rate, int channels) {
     frame_ = av_frame_alloc();
     packet_ = av_packet_alloc();
     if (!frame_ || !packet_) {
-        std::cerr << "[FFmpegDecoder] Failed to allocate frame/packet" << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Failed to allocate frame/packet" << std::endl;
         cleanup();
         return false;
     }
 
     swr_ctx_ = swr_alloc();
     if (!swr_ctx_) {
-        std::cerr << "[FFmpegDecoder] Failed to allocate resampler" << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Failed to allocate resampler" << std::endl;
         cleanup();
         return false;
     }
@@ -102,12 +102,12 @@ bool FFmpegDecoder::init(int sample_rate, int channels) {
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        std::cerr << "[FFmpegDecoder] Failed to initialize resampler: " << errbuf << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Failed to initialize resampler: " << errbuf << std::endl;
         cleanup();
         return false;
     }
 
-    std::cout << "[FFmpegDecoder] Initialized: " << sample_rate << "Hz, " << channels << " channels (Opus via FFmpeg)"
+    moonmic::logInfo() << "[FFmpegDecoder] Initialized: " << sample_rate << "Hz, " << channels << " channels (Opus via FFmpeg)"
               << std::endl;
     return true;
 }
@@ -124,7 +124,7 @@ int FFmpegDecoder::decode(const uint8_t* input, int input_size, float* output, i
     if (ret < 0) {
         char errbuf[128];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        std::cerr << "[FFmpegDecoder] avcodec_send_packet failed: " << errbuf << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] avcodec_send_packet failed: " << errbuf << std::endl;
         return -1;
     }
 
@@ -133,7 +133,7 @@ int FFmpegDecoder::decode(const uint8_t* input, int input_size, float* output, i
         if (ret != AVERROR(EAGAIN)) {
             char errbuf[128];
             av_strerror(ret, errbuf, sizeof(errbuf));
-            std::cerr << "[FFmpegDecoder] avcodec_receive_frame failed: " << errbuf << std::endl;
+            moonmic::logError() << "[FFmpegDecoder] avcodec_receive_frame failed: " << errbuf << std::endl;
         }
         return 0;
     }
@@ -155,7 +155,7 @@ int FFmpegDecoder::decode(const uint8_t* input, int input_size, float* output, i
         if (ret < 0) {
             char errbuf[128];
             av_strerror(ret, errbuf, sizeof(errbuf));
-            std::cerr << "[FFmpegDecoder] swr_convert failed: " << errbuf << std::endl;
+            moonmic::logError() << "[FFmpegDecoder] swr_convert failed: " << errbuf << std::endl;
             av_frame_unref(frame_);
             return -1;
         }
@@ -171,7 +171,7 @@ int FFmpegDecoder::decode(const uint8_t* input, int input_size, float* output, i
         av_frame_unref(frame_);
         return num_samples;
     } else {
-        std::cerr << "[FFmpegDecoder] Unexpected sample format: " << frame_->format << std::endl;
+        moonmic::logError() << "[FFmpegDecoder] Unexpected sample format: " << frame_->format << std::endl;
         av_frame_unref(frame_);
         return -1;
     }

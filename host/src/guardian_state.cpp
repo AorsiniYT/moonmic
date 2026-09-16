@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "guardian_state.h"
 #include <nlohmann/json.hpp>
@@ -41,17 +42,17 @@ bool GuardianStateManager::writeState(const GuardianState& state) {
 
         std::ofstream file(getStatePath());
         if (!file.is_open()) {
-            std::cerr << "[GuardianState] Failed to open state file for writing" << std::endl;
+            moonmic::logError() << "[GuardianState] Failed to open state file for writing" << std::endl;
             return false;
         }
 
         file << j.dump(2);
         file.close();
 
-        std::cout << "[GuardianState] State saved: " << state.original_mic_name << std::endl;
+        moonmic::logInfo() << "[GuardianState] State saved: " << state.original_mic_name << std::endl;
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "[GuardianState] Write error: " << e.what() << std::endl;
+        moonmic::logError() << "[GuardianState] Write error: " << e.what() << std::endl;
         return false;
     }
 }
@@ -74,7 +75,7 @@ bool GuardianStateManager::readState(GuardianState& state) {
 
         return !state.original_mic_id.empty();
     } catch (const std::exception& e) {
-        std::cerr << "[GuardianState] Read error: " << e.what() << std::endl;
+        moonmic::logError() << "[GuardianState] Read error: " << e.what() << std::endl;
         return false;
     }
 }
@@ -82,9 +83,9 @@ bool GuardianStateManager::readState(GuardianState& state) {
 void GuardianStateManager::deleteState() {
     try {
         std::filesystem::remove(getStatePath());
-        std::cout << "[GuardianState] State file deleted" << std::endl;
+        moonmic::logInfo() << "[GuardianState] State file deleted" << std::endl;
     } catch (const std::exception& e) {
-        std::cerr << "[GuardianState] Delete error: " << e.what() << std::endl;
+        moonmic::logError() << "[GuardianState] Delete error: " << e.what() << std::endl;
     }
 }
 

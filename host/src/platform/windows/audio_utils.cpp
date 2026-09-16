@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "audio_utils.h"
 #include "audio_device_manager.h"
@@ -59,9 +60,9 @@ bool SetDefaultRecordingDevice(const std::string& nameOrId) {
         std::string resolvedId = FindRecordingDeviceID(targetId);
         if (!resolvedId.empty()) {
             targetId = resolvedId;
-            std::cout << "[AudioUtils] Resolved device name '" << nameOrId << "' to ID: " << targetId << std::endl;
+            moonmic::logInfo() << "[AudioUtils] Resolved device name '" << nameOrId << "' to ID: " << targetId << std::endl;
         } else {
-            std::cerr << "[AudioUtils] Could not find recording device matching: " << nameOrId << std::endl;
+            moonmic::logError() << "[AudioUtils] Could not find recording device matching: " << nameOrId << std::endl;
             return false;
         }
     }
@@ -106,7 +107,7 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
                                               (PBYTE)friendlyName, sizeof(friendlyName), NULL)) {
 
             if (std::string(friendlyName).find(name) != std::string::npos) {
-                std::cout << "[AudioUtils] Found device for state change: " << friendlyName << std::endl;
+                moonmic::logInfo() << "[AudioUtils] Found device for state change: " << friendlyName << std::endl;
 
                 SP_PROPCHANGE_PARAMS params;
                 params.ClassInstallHeader.cbSize = sizeof(SP_CLASSINSTALL_HEADER);
@@ -118,15 +119,15 @@ bool ChangeDeviceState(const std::string& name, bool enable) {
                 if (SetupDiSetClassInstallParams(hDevInfo, &DeviceInfoData, (SP_CLASSINSTALL_HEADER*)&params,
                                                  sizeof(params))) {
                     if (SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, hDevInfo, &DeviceInfoData)) {
-                        std::cout << "[AudioUtils] Successfully changed state to: " << (enable ? "Enabled" : "Disabled")
+                        moonmic::logInfo() << "[AudioUtils] Successfully changed state to: " << (enable ? "Enabled" : "Disabled")
                                   << " for: " << friendlyName << std::endl;
                         success = true;
                     } else {
-                        std::cerr << "[AudioUtils] SetupDiCallClassInstaller failed. Error: " << GetLastError()
+                        moonmic::logError() << "[AudioUtils] SetupDiCallClassInstaller failed. Error: " << GetLastError()
                                   << std::endl;
                     }
                 } else {
-                    std::cerr << "[AudioUtils] SetupDiSetClassInstallParams failed." << std::endl;
+                    moonmic::logError() << "[AudioUtils] SetupDiSetClassInstallParams failed." << std::endl;
                 }
             }
         }

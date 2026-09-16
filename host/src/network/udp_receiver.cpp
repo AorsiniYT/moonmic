@@ -1,8 +1,9 @@
+#include "logger.h"
 
 #include "udp_receiver.h"
+#include <climits>
 #include <iostream>
-#include <cstring>
-#include <limits>
+#include <system_error>
 
 #ifndef _WIN32
 #include <sys/ioctl.h>
@@ -16,7 +17,6 @@ typedef int socklen_t;
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <pthread.h>
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket close
@@ -24,31 +24,17 @@ typedef int socklen_t;
 
 namespace moonmic {
 
-#ifdef _WIN32
-static DWORD WINAPI thread_func(LPVOID arg) {
-    auto* receiver = static_cast<UDPReceiver*>(arg);
-    receiver->receiveLoop();
-    return 0;
-}
-#else
-static void* thread_func(void* arg) {
-    auto* receiver = static_cast<UDPReceiver*>(arg);
-    receiver->receiveLoop();
-    return nullptr;
-}
-#endif
-
-UDPReceiver::UDPReceiver() : socket_fd_(INVALID_SOCKET), running_(false), thread_handle_(nullptr) {
+UDPReceiver::UDPReceiver() : socket_fd_(INVALID_SOCKET), running_(false) {
 #ifdef _WIN32
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
+    winsock_ready_ = WSAStartup(MAKEWORD(2, 2), &wsa) == 0;
 #endif
 }
 
 UDPReceiver::~UDPReceiver() {
     stop();
 #ifdef _WIN32
-    WSACleanup();
+    if (winsock_ready_) WSACleanup();
 #endif
 }
 
@@ -56,101 +42,91 @@ bool UDPReceiver::start(int port, const std::string& bind_address) {
     if (running_) {
         return false;
     }
-
-    socket_fd_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (socket_fd_ == INVALID_SOCKET) {
-        std::cerr << "[UDPReceiver] Failed to create socket" << std::endl;
+#ifdef _WIN32
+    if (!winsock_ready_) {
+        moonmic::logError() << "[UDPReceiver] Winsock initialization failed" << std::endl;
         return false;
     }
+#endif
+    if (port < 0 || port > 65535) {
+        moonmic::logError() << "[UDPReceiver] Invalid port: " << port << std::endl;
+        return false;
+    }
+    if (receive_thread_.joinable()) {
+        stop();
+    }
+
+    const socket_t new_socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (new_socket == INVALID_SOCKET) {
+        moonmic::logError() << "[UDPReceiver] Failed to create socket" << std::endl;
+        return false;
+    }
+    socket_fd_ = new_socket;
 
     int reuse = 1;
-    setsockopt(socket_fd_, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    if (setsockopt(new_socket, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&reuse), sizeof(reuse)) ==
+        SOCKET_ERROR) {
+        moonmic::logError() << "[UDPReceiver] Failed to configure address reuse" << std::endl;
+        closeSocket();
+        return false;
+    }
 
     struct sockaddr_in addr = {};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, bind_address.c_str(), &addr.sin_addr) != 1) {
-        std::cerr << "[UDPReceiver] Invalid bind address: " << bind_address << std::endl;
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
+        moonmic::logError() << "[UDPReceiver] Invalid bind address: " << bind_address << std::endl;
+        closeSocket();
         return false;
     }
 
-    if (bind(socket_fd_, (struct sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-        std::cerr << "[UDPReceiver] Failed to bind to port " << port << std::endl;
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
+    if (bind(new_socket, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        moonmic::logError() << "[UDPReceiver] Failed to bind to port " << port << std::endl;
+        closeSocket();
         return false;
     }
 
     running_ = true;
-
-#ifdef _WIN32
-    thread_handle_ = CreateThread(NULL, 0, thread_func, this, 0, NULL);
-    if (!thread_handle_) {
+    try {
+        receive_thread_ = std::thread(&UDPReceiver::receiveLoop, this);
+    } catch (const std::system_error& error) {
         running_ = false;
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-        std::cerr << "[UDPReceiver] Failed to create receive thread" << std::endl;
+        closeSocket();
+        moonmic::logError() << "[UDPReceiver] Failed to create receive thread: " << error.what() << std::endl;
         return false;
     }
-#else
-    pthread_t* thread = new pthread_t;
-    if (pthread_create(thread, NULL, thread_func, this) != 0) {
-        delete thread;
-        running_ = false;
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-        std::cerr << "[UDPReceiver] Failed to create receive thread" << std::endl;
-        return false;
-    }
-    thread_handle_ = thread;
-#endif
 
-    std::cout << "[UDPReceiver] Started on " << bind_address << ":" << port << std::endl;
+    moonmic::logInfo() << "[UDPReceiver] Started on " << bind_address << ":" << port << std::endl;
     return true;
 }
 
 void UDPReceiver::stop() {
-    if (!running_) {
-        return;
-    }
+    const bool was_running = running_.exchange(false);
+    closeSocket();
+    const bool had_thread = receive_thread_.joinable();
+    if (had_thread) receive_thread_.join();
+    if (was_running || had_thread) moonmic::logInfo() << "[UDPReceiver] Stopped" << std::endl;
+}
 
-    running_ = false;
-
-    if (socket_fd_ != INVALID_SOCKET) {
-        closesocket(socket_fd_);
-        socket_fd_ = INVALID_SOCKET;
-    }
-
-    if (thread_handle_) {
-#ifdef _WIN32
-        WaitForSingleObject(thread_handle_, INFINITE);
-        CloseHandle(thread_handle_);
-#else
-        pthread_t* thread = static_cast<pthread_t*>(thread_handle_);
-        pthread_join(*thread, NULL);
-        delete thread;
-#endif
-        thread_handle_ = nullptr;
-    }
-
-    std::cout << "[UDPReceiver] Stopped" << std::endl;
+void UDPReceiver::closeSocket() {
+    const socket_t socket = socket_fd_.exchange(INVALID_SOCKET);
+    if (socket != INVALID_SOCKET) closesocket(socket);
 }
 
 void UDPReceiver::receiveLoop() {
+    const socket_t socket = socket_fd_.load();
     uint8_t buffer[4096];
     struct sockaddr_in sender_addr;
     socklen_t sender_len = sizeof(sender_addr);
 
     while (running_) {
         sender_len = sizeof(sender_addr);
-        int received =
-            recvfrom(socket_fd_, (char*)buffer, sizeof(buffer), 0, (struct sockaddr*)&sender_addr, &sender_len);
+        int received = recvfrom(socket, reinterpret_cast<char*>(buffer), sizeof(buffer), 0,
+                                reinterpret_cast<sockaddr*>(&sender_addr), &sender_len);
 
         if (received < 0) {
             if (running_) {
-                std::cerr << "[UDPReceiver] Receive error" << std::endl;
+                moonmic::logError() << "[UDPReceiver] Receive error" << std::endl;
             }
             break;
         }
@@ -167,9 +143,9 @@ void UDPReceiver::receiveLoop() {
         unsigned long bytes_available = 0;
 
 #ifdef _WIN32
-        ioctlsocket(socket_fd_, FIONREAD, &bytes_available);
+        ioctlsocket(socket, FIONREAD, &bytes_available);
 #else
-        ioctl(socket_fd_, FIONREAD, &bytes_available);
+        ioctl(socket, FIONREAD, &bytes_available);
 #endif
 
         if (bytes_available > 2048) {
@@ -180,21 +156,22 @@ void UDPReceiver::receiveLoop() {
             packet_callback_(buffer, received, std::string(sender_ip), sender_port, is_lagging);
         }
     }
+    running_ = false;
 }
 
 bool UDPReceiver::sendTo(const void* data, size_t size, const std::string& ip, uint16_t port) {
-    if (socket_fd_ == INVALID_SOCKET || size > static_cast<size_t>(std::numeric_limits<int>::max())) return false;
+    const socket_t socket = socket_fd_.load();
+    if (socket == INVALID_SOCKET || size > static_cast<size_t>(INT_MAX)) return false;
 
-    struct sockaddr_in dest_addr;
-    memset(&dest_addr, 0, sizeof(dest_addr));
+    struct sockaddr_in dest_addr = {};
     dest_addr.sin_family = AF_INET;
     dest_addr.sin_port = htons(port);
-    dest_addr.sin_addr.s_addr = inet_addr(ip.c_str());
+    if (inet_pton(AF_INET, ip.c_str(), &dest_addr.sin_addr) != 1) return false;
 
-    int sent = sendto(socket_fd_, (const char*)data, static_cast<int>(size), 0, (struct sockaddr*)&dest_addr,
-                      sizeof(dest_addr));
+    int sent = sendto(socket, reinterpret_cast<const char*>(data), static_cast<int>(size), 0,
+                      reinterpret_cast<const sockaddr*>(&dest_addr), sizeof(dest_addr));
 
-    return sent == (int)size;
+    return sent == static_cast<int>(size);
 }
 
 } // namespace moonmic

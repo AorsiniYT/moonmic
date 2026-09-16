@@ -1,8 +1,7 @@
+#include "logger.h"
 
 #include "config.h"
-#include "logger.h"
 #include "audio_receiver.h"
-#include "sunshine_integration.h"
 #include "display_manager.h"
 #include "sunshine_webui.h"
 #include "single_instance.h"
@@ -154,7 +153,119 @@ static void drawSunshineWebUILoginPopup(SunshineWebUI& sunshine_webui) {
     }
 }
 
-void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration& sunshine,
+static void renderSunshinePanel(SunshineWebUI& sunshine_webui,
+                                SunshineSettingsGUI& settings, const Config& config) {
+    ImGui::Text("Sunshine Integration");
+
+    if (config.sunshine.paired) {
+        ImGui::TextColored(ImVec4(0, 1, 0, 1), "[OK] Sunshine Paired");
+
+        if (sunshine_webui.isLoggedIn()) {
+            ImGui::Text("Web UI: Logged in as %s", config.sunshine.webui_username.c_str());
+            if (ImGui::Button("Sunshine Settings")) settings.open();
+            ShowHelpTooltip(Tooltips::SUNSHINE_WEBUI);
+        } else {
+            ImGui::TextColored(ImVec4(1, 1, 0, 1), "Web UI: Not logged in");
+            ImGui::TextWrapped("Login required for client validation & security");
+            if (ImGui::Button("Login to Sunshine Web UI")) ImGui::OpenPopup("Sunshine Web UI Login");
+            ShowHelpTooltip(Tooltips::SUNSHINE_WEBUI);
+        }
+    } else {
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "[!] Sunshine Web UI Login Required");
+        ImGui::TextWrapped("Please login to Sunshine Web UI to access full functionality.");
+        ImGui::Spacing();
+        if (ImGui::Button("Login to Sunshine Web UI")) ImGui::OpenPopup("Sunshine Web UI Login");
+    }
+
+    drawSunshineWebUILoginPopup(sunshine_webui);
+}
+
+static void renderAboutPopup() {
+    if (!ImGui::BeginPopupModal("About Moonmic", NULL, ImGuiWindowFlags_AlwaysAutoResize)) return;
+
+    ImGui::Text("Moonmic v%s", MOONMIC_VERSION);
+    ImGui::Separator();
+    ImGui::Text("Real-time microphone streaming for PS Vita and other platforms");
+    ImGui::Spacing();
+
+    ImGui::Text("Author:");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("AorsiniYT")) {
+#ifdef _WIN32
+        ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT", NULL, NULL, SW_SHOWNORMAL);
+#else
+        system("xdg-open https://github.com/AorsiniYT &");
+#endif
+    }
+
+    ImGui::Text("GitHub:");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("moonmic")) {
+#ifdef _WIN32
+        ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT/moonmic", NULL, NULL, SW_SHOWNORMAL);
+#else
+        system("xdg-open https://github.com/AorsiniYT/moonmic &");
+#endif
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.3f, 0.3f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+    if (ImGui::Button("Donate on Ko-fi", ImVec2(200, 30))) {
+#ifdef _WIN32
+        ShellExecuteA(NULL, "open", "https://ko-fi.com/aorsini", NULL, NULL, SW_SHOWNORMAL);
+#else
+        system("xdg-open https://ko-fi.com/aorsini &");
+#endif
+    }
+    ImGui::PopStyleColor(2);
+
+    ImGui::Spacing();
+    if (ImGui::Button("Close", ImVec2(200, 0))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+static void renderUpdatePopup() {
+    if (g_update_available && !g_update_dismissed) ImGui::OpenPopup("Update Available");
+    if (!ImGui::BeginPopupModal("Update Available", NULL, ImGuiWindowFlags_AlwaysAutoResize)) return;
+
+    ImGui::Text("New Version Available!");
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::Text("Current Version: %s", VersionChecker::getCurrentVersion().c_str());
+    ImGui::Text("Latest Version:  %s", g_latest_version.c_str());
+    ImGui::Spacing();
+    ImGui::TextWrapped("A new version of Moonmic is available. Click Download to visit the releases page.");
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.9f, 0.3f, 1.0f));
+    if (ImGui::Button("Download", ImVec2(120, 30))) {
+#ifdef _WIN32
+        ShellExecuteA(NULL, "open", g_download_url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+#else
+        std::string cmd = "xdg-open " + g_download_url + " &";
+        system(cmd.c_str());
+#endif
+        g_update_dismissed = true;
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::SameLine();
+
+    if (ImGui::Button("Dismiss", ImVec2(120, 30))) {
+        g_update_dismissed = true;
+        ImGui::CloseCurrentPopup();
+    }
+
+    ImGui::EndPopup();
+}
+
+void renderGUI(GLFWwindow* window, AudioReceiver& receiver,
                SunshineWebUI& sunshine_webui, DisplayManager& display_mgr, DisplaySettingsGUI& display_settings_gui,
                SunshineSettingsGUI& sunshine_settings_gui, DebugGUI& debug_gui, Config& config) {
 
@@ -209,7 +320,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                 std::string config_path = Config::getDefaultConfigPath();
                 config.save(config_path);
 
-                std::cout << "[Main] Driver installed. Prompting for restart..." << std::endl;
+                moonmic::logInfo() << "[Main] Driver installed. Prompting for restart..." << std::endl;
 
                 ImGui::OpenPopup("Install Success");
             } else {
@@ -256,25 +367,25 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
 
         std::string config_path = Config::getDefaultConfigPath();
         if (config.save(config_path)) {
-            std::cout << "[Config] Auto-saved driver selection: " << config.audio.driver_device_name << std::endl;
+            moonmic::logInfo() << "[Config] Auto-saved driver selection: " << config.audio.driver_device_name << std::endl;
         }
 
         moonmic::platform::windows::ChangeDeviceState(config.audio.driver_device_name, true);
 
         if (receiver.isRunning()) {
-            std::cout << "[Main] Switching to " << driver_names[selected_driver] << ", restarting receiver..."
+            moonmic::logInfo() << "[Main] Switching to " << driver_names[selected_driver] << ", restarting receiver..."
                       << std::endl;
             receiver.stop();
 
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         } else {
-            std::cout << "[Main] Driver switched, attempting to start receiver..." << std::endl;
+            moonmic::logInfo() << "[Main] Driver switched, attempting to start receiver..." << std::endl;
         }
 
         if (receiver.start(config)) {
-            std::cout << "[Main] Receiver restarted successfully with new driver" << std::endl;
+            moonmic::logInfo() << "[Main] Receiver restarted successfully with new driver" << std::endl;
         } else {
-            std::cerr << "[Main] Failed to restart receiver with new driver" << std::endl;
+            moonmic::logError() << "[Main] Failed to restart receiver with new driver" << std::endl;
         }
     }
 
@@ -357,7 +468,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                     } else {
 
                         receiver.stop();
-                        std::cout << "[Main] Stopped audio receiver for driver uninstall" << std::endl;
+                        moonmic::logInfo() << "[Main] Stopped audio receiver for driver uninstall" << std::endl;
 
                         is_uninstalling = true;
                         ImGui::OpenPopup("Uninstalling Driver");
@@ -405,7 +516,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
                     } else {
 
                         receiver.stop();
-                        std::cout << "[Main] Stopped audio receiver for driver uninstall" << std::endl;
+                        moonmic::logInfo() << "[Main] Stopped audio receiver for driver uninstall" << std::endl;
 
                         if (installer.uninstallVBCable()) {
                             ImGui::OpenPopup("Uninstall Started");
@@ -511,7 +622,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
         if (ImGui::Button("OK", ImVec2(120, 0))) {
             if (DriverInstaller::restartAsAdmin()) {
 
-                std::cout << "[Main] Restarting as admin, closing current instance..." << std::endl;
+                moonmic::logInfo() << "[Main] Restarting as admin, closing current instance..." << std::endl;
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
             }
             ImGui::CloseCurrentPopup();
@@ -534,7 +645,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
         ImGui::Spacing();
 
         if (ImGui::Button("Restart Application", ImVec2(180, 40))) {
-            std::cout << "[Main] User requested restart. Signaling Guardian..." << std::endl;
+            moonmic::logInfo() << "[Main] User requested restart. Signaling Guardian..." << std::endl;
             moonmic::GuardianLauncher::signalRestart();
             glfwSetWindowShouldClose(window, GLFW_TRUE);
             ImGui::CloseCurrentPopup();
@@ -609,40 +720,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
     ImGui::Separator();
 #endif
 
-    ImGui::Text("Sunshine Integration");
-
-    if (sunshine.isPaired()) {
-
-        ImGui::TextColored(ImVec4(0, 1, 0, 1), "[OK] Sunshine Paired");
-
-        if (sunshine_webui.isLoggedIn()) {
-            ImGui::Text("Web UI: Logged in as %s", config.sunshine.webui_username.c_str());
-
-            if (ImGui::Button("Sunshine Settings")) {
-                sunshine_settings_gui.open();
-            }
-            ShowHelpTooltip(Tooltips::SUNSHINE_WEBUI);
-        } else {
-
-            ImGui::TextColored(ImVec4(1, 1, 0, 1), "Web UI: Not logged in");
-            ImGui::TextWrapped("Login required for client validation & security");
-
-            if (ImGui::Button("Login to Sunshine Web UI")) {
-                ImGui::OpenPopup("Sunshine Web UI Login");
-            }
-            ShowHelpTooltip(Tooltips::SUNSHINE_WEBUI);
-        }
-    } else {
-
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), "[!] Sunshine Web UI Login Required");
-        ImGui::TextWrapped("Please login to Sunshine Web UI to access full functionality.");
-        ImGui::Spacing();
-        if (ImGui::Button("Login to Sunshine Web UI")) {
-            ImGui::OpenPopup("Sunshine Web UI Login");
-        }
-    }
-
-    drawSunshineWebUILoginPopup(sunshine_webui);
+    renderSunshinePanel(sunshine_webui, sunshine_settings_gui, config);
 
     ImGui::Separator();
 
@@ -692,7 +770,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
     if (config_changed) {
         std::string config_path = Config::getDefaultConfigPath();
         if (config.save(config_path)) {
-            std::cout << "[Config] Auto-saved configuration changes" << std::endl;
+            moonmic::logInfo() << "[Config] Auto-saved configuration changes" << std::endl;
         }
     }
 
@@ -702,7 +780,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
 
             std::string config_path = Config::getDefaultConfigPath();
             if (config.save(config_path)) {
-                std::cout << "[Config] Auto-saved changes" << std::endl;
+                moonmic::logInfo() << "[Config] Auto-saved changes" << std::endl;
             }
         }
     }
@@ -718,7 +796,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
 
             std::string config_path = Config::getDefaultConfigPath();
             if (config.save(config_path)) {
-                std::cout << "[Config] Auto-saved speaker mode: "
+                moonmic::logInfo() << "[Config] Auto-saved speaker mode: "
                           << (config.audio.use_speaker_mode ? "ON (direct playback)" : "OFF (VB-Cable)") << std::endl;
             }
         }
@@ -809,7 +887,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
 
                         std::string config_path = Config::getDefaultConfigPath();
                         if (config.save(config_path)) {
-                            std::cout << "[Config] Original microphone set to: " << availableMics[i].name << std::endl;
+                            moonmic::logInfo() << "[Config] Original microphone set to: " << availableMics[i].name << std::endl;
                         }
                     }
 
@@ -848,7 +926,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
     ImGui::Spacing();
 
     if (ImGui::Checkbox("Debug Mode (Verbose Logs)", &g_debug_mode)) {
-        std::cout << "[Main] Debug mode: " << (g_debug_mode ? "ON" : "OFF") << std::endl;
+        moonmic::logInfo() << "[Main] Debug mode: " << (g_debug_mode ? "ON" : "OFF") << std::endl;
 
         DebugGUI::showConsole(g_debug_mode);
     }
@@ -889,13 +967,14 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
         ImGui::SameLine();
 
         if (ImGui::Button("Reload Sunshine")) {
-            sunshine.reload();
-
-            ImGui::TextColored(ImVec4(0, 1, 0, 1), "Paired with Sunshine");
+            config.sunshine.paired = sunshine_webui.refreshClientList();
+            if (!config.sunshine.paired) {
+                moonmic::logError() << "[Main] Failed to reload Sunshine clients" << std::endl;
+            }
 
             std::string config_path = Config::getDefaultConfigPath();
             if (config.save(config_path)) {
-                std::cout << "[Config] Auto-saved Sunshine client list" << std::endl;
+                moonmic::logInfo() << "[Config] Auto-saved Sunshine client list" << std::endl;
             }
         }
         ShowHelpTooltip(Tooltips::RELOAD_SUNSHINE);
@@ -918,7 +997,7 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
             ImGui::TextWrapped("The application needs to restart to initialize the audio engine with the new driver.");
 
             if (ImGui::Button("Restart Application", ImVec2(200, 30))) {
-                std::cout << "[Main] User requested restart. Signaling Guardian..." << std::endl;
+                moonmic::logInfo() << "[Main] User requested restart. Signaling Guardian..." << std::endl;
                 g_restart_requested = true;
                 moonmic::GuardianLauncher::signalRestart();
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
@@ -935,97 +1014,8 @@ void renderGUI(GLFWwindow* window, AudioReceiver& receiver, SunshineIntegration&
     display_settings_gui.render(display_mgr);
     sunshine_settings_gui.render(sunshine_webui, config);
 
-    if (ImGui::BeginPopupModal("About Moonmic", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("Moonmic v%s", MOONMIC_VERSION);
-        ImGui::Separator();
-
-        ImGui::Text("Real-time microphone streaming for PS Vita and other platforms");
-        ImGui::Spacing();
-
-        ImGui::Text("Author:");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("AorsiniYT")) {
-#ifdef _WIN32
-            ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT", NULL, NULL, SW_SHOWNORMAL);
-#else
-            system("xdg-open https://github.com/AorsiniYT &");
-#endif
-        }
-
-        ImGui::Text("GitHub:");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("moonmic")) {
-#ifdef _WIN32
-            ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT/moonmic", NULL, NULL, SW_SHOWNORMAL);
-#else
-            system("xdg-open https://github.com/AorsiniYT/moonmic &");
-#endif
-        }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.3f, 0.3f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
-        if (ImGui::Button("Donate on Ko-fi", ImVec2(200, 30))) {
-#ifdef _WIN32
-            ShellExecuteA(NULL, "open", "https://ko-fi.com/aorsini", NULL, NULL, SW_SHOWNORMAL);
-#else
-            system("xdg-open https://ko-fi.com/aorsini &");
-#endif
-        }
-        ImGui::PopStyleColor(2);
-
-        ImGui::Spacing();
-        if (ImGui::Button("Close", ImVec2(200, 0))) {
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-    }
-
-    if (g_update_available && !g_update_dismissed) {
-        ImGui::OpenPopup("Update Available");
-    }
-
-    if (ImGui::BeginPopupModal("Update Available", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("New Version Available!");
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::Text("Current Version: %s", VersionChecker::getCurrentVersion().c_str());
-        ImGui::Text("Latest Version:  %s", g_latest_version.c_str());
-        ImGui::Spacing();
-
-        ImGui::TextWrapped("A new version of Moonmic is available. Click Download to visit the releases page.");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.9f, 0.3f, 1.0f));
-        if (ImGui::Button("Download", ImVec2(120, 30))) {
-#ifdef _WIN32
-            ShellExecuteA(NULL, "open", g_download_url.c_str(), NULL, NULL, SW_SHOWNORMAL);
-#else
-            std::string cmd = "xdg-open " + g_download_url + " &";
-            system(cmd.c_str());
-#endif
-            g_update_dismissed = true;
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::PopStyleColor(2);
-
-        ImGui::SameLine();
-
-        if (ImGui::Button("Dismiss", ImVec2(120, 30))) {
-            g_update_dismissed = true;
-            ImGui::CloseCurrentPopup();
-        }
-
-        ImGui::EndPopup();
-    }
+    renderAboutPopup();
+    renderUpdatePopup();
 
     if (is_installing) {
         if (!ImGui::IsPopupOpen("Installing Driver")) {
@@ -1045,13 +1035,13 @@ int main_gui(int, char*[]) {
 
     SingleInstance single_instance("Moonmic host by AorsiniYT");
     if (single_instance.isAnotherInstanceRunning()) {
-        std::cout << "[Main] Another instance is already running" << std::endl;
+        moonmic::logInfo() << "[Main] Another instance is already running" << std::endl;
         single_instance.bringExistingToFront();
         return 0;
     }
 
     if (!glfwInit()) {
-        std::cerr << "Failed to initialize GLFW" << std::endl;
+        moonmic::logError() << "Failed to initialize GLFW" << std::endl;
         return 1;
     }
 
@@ -1061,7 +1051,7 @@ int main_gui(int, char*[]) {
 
     GLFWwindow* window = glfwCreateWindow(600, 700, "Moonmic host by AorsiniYT", NULL, NULL);
     if (!window) {
-        std::cerr << "Failed to create window" << std::endl;
+        moonmic::logError() << "Failed to create window" << std::endl;
         glfwTerminate();
         return 1;
     }
@@ -1084,10 +1074,10 @@ int main_gui(int, char*[]) {
     Config config;
     std::string config_path = Config::getDefaultConfigPath();
     if (!config.load(config_path)) {
-        std::cerr << "[Config] Failed to load from: " << config_path << std::endl;
-        std::cerr << "[Config] Using default configuration" << std::endl;
+        moonmic::logError() << "[Config] Failed to load from: " << config_path << std::endl;
+        moonmic::logError() << "[Config] Using default configuration" << std::endl;
     } else {
-        std::cout << "[Config] Loaded from: " << config_path << std::endl;
+        moonmic::logInfo() << "[Config] Loaded from: " << config_path << std::endl;
     }
 
 #ifdef _WIN32
@@ -1099,21 +1089,20 @@ int main_gui(int, char*[]) {
         if (config.audio.original_mic_id.empty()) {
             config.audio.original_mic_id = currentDefault.id;
             config.save(config_path);
-            std::cout << "[Main] Saved original microphone: " << currentDefault.name << std::endl;
+            moonmic::logInfo() << "[Main] Saved original microphone: " << currentDefault.name << std::endl;
         }
     }
 
     if (!config.audio.original_mic_id.empty()) {
         if (GuardianLauncher::launchGuardian(config.audio.original_mic_id, currentDefault.name)) {
-            std::cout << "[Main] Guardian watchdog activated" << std::endl;
+            moonmic::logInfo() << "[Main] Guardian watchdog activated" << std::endl;
         } else {
-            std::cerr << "[Main] Warning: Guardian watchdog failed to start" << std::endl;
+            moonmic::logError() << "[Main] Warning: Guardian watchdog failed to start" << std::endl;
         }
     }
 #endif
 
     AudioReceiver receiver;
-    SunshineIntegration sunshine(config);
     SunshineWebUI sunshine_webui(config);
     DisplayManager display_mgr;
     DisplaySettingsGUI display_settings_gui;
@@ -1121,7 +1110,6 @@ int main_gui(int, char*[]) {
     DebugGUI debug_gui;
 
     receiver.setSunshineWebUI(&sunshine_webui);
-    receiver.setDisplayManager(&display_mgr);
 
     DebugGUI::showConsole(g_debug_mode);
 
@@ -1133,7 +1121,7 @@ int main_gui(int, char*[]) {
 
             bool isSteam = (driverName.find("Steam") != std::string::npos);
             if (isSteam || driverName.find("VB-") != std::string::npos) {
-                std::cout << "[Main] Ensuring driver is enabled: " << driverName << std::endl;
+                moonmic::logInfo() << "[Main] Ensuring driver is enabled: " << driverName << std::endl;
                 moonmic::platform::windows::ChangeDeviceState(driverName, true);
 
                 if (isSteam) {
@@ -1145,9 +1133,8 @@ int main_gui(int, char*[]) {
     }
 #endif
 
-    std::cout << "[Main] Starting receiver..." << std::endl;
     if (!receiver.start(config)) {
-        std::cerr << "[Main] Failed to start receiver" << std::endl;
+        moonmic::logError() << "[Main] Failed to start receiver" << std::endl;
     }
 
     auto version_check = std::async(std::launch::async, &VersionChecker::checkForUpdates);
@@ -1158,12 +1145,12 @@ int main_gui(int, char*[]) {
             const auto info = version_check.get();
             g_update_check_done = true;
             if (info.update_available) {
-                std::cout << "[VersionChecker] Update available: " << info.latest_version << std::endl;
+                moonmic::logInfo() << "[VersionChecker] Update available: " << info.latest_version << std::endl;
                 g_update_available = true;
                 g_latest_version = info.latest_version;
                 g_download_url = info.download_url;
             } else {
-                std::cout << "[VersionChecker] No update available (current: " << info.current_version << ")"
+                moonmic::logInfo() << "[VersionChecker] No update available (current: " << info.current_version << ")"
                           << std::endl;
             }
         }
@@ -1209,7 +1196,7 @@ int main_gui(int, char*[]) {
         // Update debug GUI (must be called every frame for animations)
         debug_gui.update(delta_time, stats, connected, receiving);
 
-        renderGUI(window, receiver, sunshine, sunshine_webui, display_mgr, display_settings_gui, sunshine_settings_gui,
+        renderGUI(window, receiver, sunshine_webui, display_mgr, display_settings_gui, sunshine_settings_gui,
                   debug_gui, config);
 
         debug_gui.render();
@@ -1244,13 +1231,12 @@ int main_gui(int, char*[]) {
                 config.save(Config::getDefaultConfigPath());
             }
 
-            std::cout << "[Main] Disabling Virtual Device Driver..." << std::endl;
+            moonmic::logInfo() << "[Main] Disabling Virtual Device Driver..." << std::endl;
             moonmic::platform::windows::ChangeDeviceState(config.audio.driver_device_name, false);
         }
     }
 #endif
 
-    std::cout << "[Main] Saving configuration on exit..." << std::endl;
     config.save(config_path);
 
     ImGui_ImplOpenGL3_Shutdown();
@@ -1266,35 +1252,35 @@ int main_gui(int, char*[]) {
 #endif
 
 int main_console(int argc, char* argv[]) {
-    std::cout << "=== Moonmic Host ===" << std::endl;
-    std::cout << "Version: " << MOONMIC_VERSION << std::endl << std::endl;
+    moonmic::logInfo() << "=== Moonmic Host ===" << std::endl;
+    moonmic::logInfo() << "Version: " << MOONMIC_VERSION << std::endl << std::endl;
 
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--install-driver") {
 #ifdef _WIN32
-            std::cout << "[Main] Installing VB-CABLE driver..." << std::endl;
+            moonmic::logInfo() << "[Main] Installing VB-CABLE driver..." << std::endl;
             DriverInstaller installer;
 
             if (!DriverInstaller::isRunningAsAdmin()) {
-                std::cout << "[Main] Requesting administrator privileges..." << std::endl;
+                moonmic::logInfo() << "[Main] Requesting administrator privileges..." << std::endl;
                 if (DriverInstaller::restartAsAdmin()) {
                     return 0;
                 } else {
-                    std::cerr << "[Main] Failed to restart as administrator" << std::endl;
+                    moonmic::logError() << "[Main] Failed to restart as administrator" << std::endl;
                     return 1;
                 }
             }
 
             if (installer.installVBCable()) {
-                std::cout << "[Main] Driver installation completed" << std::endl;
-                std::cout << "[Main] Please reboot your computer" << std::endl;
+                moonmic::logInfo() << "[Main] Driver installation completed" << std::endl;
+                moonmic::logInfo() << "[Main] Please reboot your computer" << std::endl;
                 return 0;
             } else {
-                std::cerr << "[Main] Driver installation failed" << std::endl;
+                moonmic::logError() << "[Main] Driver installation failed" << std::endl;
                 return 1;
             }
 #else
-            std::cerr << "[Main] --install-driver is only supported on Windows" << std::endl;
+            moonmic::logError() << "[Main] --install-driver is only supported on Windows" << std::endl;
             return 1;
 #endif
         }
@@ -1309,12 +1295,12 @@ int main_console(int argc, char* argv[]) {
             i++;
         } else if (std::string(argv[i]) == "--debug") {
             g_debug_mode = true;
-            std::cout << "[Main] Debug mode enabled (verbose logging)" << std::endl;
+            moonmic::logInfo() << "[Main] Debug mode enabled (verbose logging)" << std::endl;
         }
     }
 
     if (!config.load(config_path)) {
-        std::cout << "[Main] Using default configuration" << std::endl;
+        moonmic::logInfo() << "[Main] Using default configuration" << std::endl;
     }
 
     signal(SIGINT, signal_handler);
@@ -1322,18 +1308,18 @@ int main_console(int argc, char* argv[]) {
 
     AudioReceiver receiver;
     if (!receiver.start(config)) {
-        std::cerr << "[Main] Failed to start receiver" << std::endl;
+        moonmic::logError() << "[Main] Failed to start receiver" << std::endl;
         return 1;
     }
 
-    std::cout << "[Main] Press Ctrl+C to stop" << std::endl;
+    moonmic::logInfo() << "[Main] Press Ctrl+C to stop" << std::endl;
 
     while (g_shutdown_requested == 0) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
 
         auto stats = receiver.getStats();
         if (stats.is_receiving) {
-            std::cout << "[Stats] Packets: " << stats.packets_received << " | Dropped: " << stats.packets_dropped
+            moonmic::logInfo() << "[Stats] Packets: " << stats.packets_received << " | Dropped: " << stats.packets_dropped
                       << " | From: " << stats.last_sender_ip << std::endl;
         }
     }
@@ -1344,7 +1330,7 @@ int main_console(int argc, char* argv[]) {
 
     GuardianLauncher::signalNormalShutdown();
 #endif
-    std::cout << "[Main] Shutdown complete" << std::endl;
+    moonmic::logInfo() << "[Main] Shutdown complete" << std::endl;
 
     return 0;
 }
@@ -1352,9 +1338,6 @@ int main_console(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
 
     moonmic::Logger::instance().init();
-
-    std::cout << "moonmic-host starting..." << std::endl;
-    std::cout.flush();
 
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--debug") {
@@ -1366,12 +1349,12 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
 
     if (!moonmic::DriverInstaller::isRunningAsAdmin()) {
-        std::cout << "[Main] Administrator privileges required. Requesting elevation..." << std::endl;
+        moonmic::logInfo() << "[Main] Administrator privileges required. Requesting elevation..." << std::endl;
         if (moonmic::DriverInstaller::restartAsAdmin()) {
             return 0;
         } else {
-            std::cerr << "[Main] Failed to restart as Administrator." << std::endl;
-            std::cerr << "[Main] Please run this application as Administrator." << std::endl;
+            moonmic::logError() << "[Main] Failed to restart as Administrator." << std::endl;
+            moonmic::logError() << "[Main] Please run this application as Administrator." << std::endl;
             return 1;
         }
     }
@@ -1388,7 +1371,7 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        std::cout << "GUI mode: " << (use_gui ? "enabled" : "disabled") << std::endl;
+        moonmic::logInfo() << "GUI mode: " << (use_gui ? "enabled" : "disabled") << std::endl;
 
         if (use_gui) {
             return main_gui(argc, argv);
@@ -1397,10 +1380,10 @@ int main(int argc, char* argv[]) {
 
         return main_console(argc, argv);
     } catch (const std::exception& e) {
-        std::cerr << "Fatal error: " << e.what() << std::endl;
+        moonmic::logError() << "Fatal error: " << e.what() << std::endl;
         return 1;
     } catch (...) {
-        std::cerr << "Unknown fatal error occurred" << std::endl;
+        moonmic::logError() << "Unknown fatal error occurred" << std::endl;
         return 1;
     }
 }

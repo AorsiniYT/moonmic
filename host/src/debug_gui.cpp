@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "debug_gui.h"
 #include "audio_receiver.h"
@@ -361,7 +362,7 @@ bool DebugGUI::initWindow() {
 
     GLFWwindow* win = glfwCreateWindow(650, 550, "Performance Monitor - Moonmic", NULL, main_window);
     if (!win) {
-        std::cerr << "[DebugGUI] Failed to create debug window" << std::endl;
+        moonmic::logError() << "[DebugGUI] Failed to create debug window" << std::endl;
         glfwMakeContextCurrent(main_window);
         return false;
     }
@@ -381,7 +382,7 @@ bool DebugGUI::initWindow() {
     glfwMakeContextCurrent(main_window);
 
     window_initialized_ = true;
-    std::cout << "[DebugGUI] Performance monitor window created (separate OS window)" << std::endl;
+    moonmic::logInfo() << "[DebugGUI] Performance monitor window created (separate OS window)" << std::endl;
     return true;
 }
 
@@ -413,7 +414,7 @@ void DebugGUI::open() {
         glfwShowWindow(static_cast<GLFWwindow*>(debug_window_));
         glfwFocusWindow(static_cast<GLFWwindow*>(debug_window_));
     }
-    std::cout << "[DebugGUI] Performance monitor opened" << std::endl;
+    moonmic::logInfo() << "[DebugGUI] Performance monitor opened" << std::endl;
 }
 
 void DebugGUI::close() {

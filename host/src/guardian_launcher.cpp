@@ -1,3 +1,4 @@
+#include "logger.h"
 #include "guardian_launcher.h"
 #include "guardian_state.h"
 #include <filesystem>
@@ -44,7 +45,7 @@ bool GuardianLauncher::launchGuardian(const std::string& original_mic_id, const 
     state.timestamp = time(nullptr);
 
     if (!GuardianStateManager::writeState(state)) {
-        std::cerr << "[GuardianLauncher] Failed to write state" << std::endl;
+        moonmic::logError() << "[GuardianLauncher] Failed to write state" << std::endl;
         return false;
     }
 
@@ -55,7 +56,7 @@ bool GuardianLauncher::launchGuardian(const std::string& original_mic_id, const 
     if (!shutdown_event || !restart_event) {
         closeSynchronizationEvents();
         GuardianStateManager::deleteState();
-        std::cerr << "[GuardianLauncher] Failed to create synchronization events" << std::endl;
+        moonmic::logError() << "[GuardianLauncher] Failed to create synchronization events" << std::endl;
         return false;
     }
 
@@ -66,7 +67,7 @@ bool GuardianLauncher::launchGuardian(const std::string& original_mic_id, const 
     if (!std::filesystem::exists(guardianPath)) {
         closeSynchronizationEvents();
         GuardianStateManager::deleteState();
-        std::cerr << "[GuardianLauncher] Guardian executable not found: " << guardianPath << std::endl;
+        moonmic::logError() << "[GuardianLauncher] Guardian executable not found: " << guardianPath << std::endl;
         return false;
     }
 
@@ -84,14 +85,14 @@ bool GuardianLauncher::launchGuardian(const std::string& original_mic_id, const 
                         &si, &pi)) {
         closeSynchronizationEvents();
         GuardianStateManager::deleteState();
-        std::cerr << "[GuardianLauncher] Failed to launch guardian" << std::endl;
+        moonmic::logError() << "[GuardianLauncher] Failed to launch guardian" << std::endl;
         return false;
     }
 
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
 
-    std::cout << "[GuardianLauncher] Guardian launched (PID: " << pi.dwProcessId << ")" << std::endl;
+    moonmic::logInfo() << "[GuardianLauncher] Guardian launched (PID: " << pi.dwProcessId << ")" << std::endl;
     return true;
 #else
 
@@ -100,7 +101,7 @@ bool GuardianLauncher::launchGuardian(const std::string& original_mic_id, const 
 
     if (!std::filesystem::exists(guardianPath)) {
         GuardianStateManager::deleteState();
-        std::cerr << "[GuardianLauncher] Guardian executable not found: " << guardianPath << std::endl;
+        moonmic::logError() << "[GuardianLauncher] Guardian executable not found: " << guardianPath << std::endl;
         return false;
     }
 
@@ -110,11 +111,11 @@ bool GuardianLauncher::launchGuardian(const std::string& original_mic_id, const 
         execl(guardianPath.c_str(), guardianPath.c_str(), pidStr.c_str(), NULL);
         exit(1);
     } else if (pid > 0) {
-        std::cout << "[GuardianLauncher] Guardian launched (PID: " << pid << ")" << std::endl;
+        moonmic::logInfo() << "[GuardianLauncher] Guardian launched (PID: " << pid << ")" << std::endl;
         return true;
     } else {
         GuardianStateManager::deleteState();
-        std::cerr << "[GuardianLauncher] fork() failed" << std::endl;
+        moonmic::logError() << "[GuardianLauncher] fork() failed" << std::endl;
         return false;
     }
 #endif

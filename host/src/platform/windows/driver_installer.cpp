@@ -1,3 +1,4 @@
+#include "logger.h"
 
 #include "driver_installer.h"
 #define INITGUID
@@ -82,7 +83,7 @@ bool DriverInstaller::restartAsAdmin() {
     if (!ShellExecuteExA(&sei)) {
         DWORD error = GetLastError();
         if (error == ERROR_CANCELLED) {
-            std::cerr << "[DriverInstaller] User cancelled UAC prompt" << std::endl;
+            moonmic::logError() << "[DriverInstaller] User cancelled UAC prompt" << std::endl;
         }
         return false;
     }
@@ -234,7 +235,7 @@ std::string DriverInstaller::getVBCableOutputDevice() {
 
 bool DriverInstaller::installVBCable() {
     if (!isRunningAsAdmin()) {
-        std::cerr << "[DriverInstaller] Administrator privileges required" << std::endl;
+        moonmic::logError() << "[DriverInstaller] Administrator privileges required" << std::endl;
         return false;
     }
 
@@ -243,7 +244,7 @@ bool DriverInstaller::installVBCable() {
 
 bool DriverInstaller::uninstallVBCable() {
     if (!isRunningAsAdmin()) {
-        std::cerr << "[DriverInstaller] Administrator privileges required" << std::endl;
+        moonmic::logError() << "[DriverInstaller] Administrator privileges required" << std::endl;
         return false;
     }
 
@@ -258,7 +259,7 @@ bool DriverInstaller::extractResourceToFile(const char* resource_name, const std
 
     HRSRC hResource = FindResourceA(NULL, resource_name, RT_RCDATA);
     if (!hResource) {
-        std::cerr << "[DriverInstaller] Resource not found: " << resource_name << std::endl;
+        moonmic::logError() << "[DriverInstaller] Resource not found: " << resource_name << std::endl;
         return false;
     }
 
@@ -280,7 +281,7 @@ bool DriverInstaller::extractResourceToFile(const char* resource_name, const std
     HANDLE hFile = CreateFileA(output_path.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
-        std::cerr << "[DriverInstaller] Failed to create: " << output_path << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to create: " << output_path << std::endl;
         return false;
     }
 
@@ -292,13 +293,13 @@ bool DriverInstaller::extractResourceToFile(const char* resource_name, const std
 }
 
 bool DriverInstaller::extractEmbeddedVBCable(const std::string& temp_dir) {
-    std::cout << "[DriverInstaller] Extracting embedded VB-CABLE driver files..." << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Extracting embedded VB-CABLE driver files..." << std::endl;
 
     std::error_code error;
     std::filesystem::remove_all(temp_dir, error);
     error.clear();
     if (!std::filesystem::create_directories(temp_dir, error) || error) {
-        std::cerr << "[DriverInstaller] Failed to create temporary directory: " << temp_dir << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to create temporary directory: " << temp_dir << std::endl;
         return false;
     }
 
@@ -352,7 +353,7 @@ bool DriverInstaller::extractEmbeddedVBCable(const std::string& temp_dir) {
         }
     }
 
-    std::cout << "[DriverInstaller] Extracted " << extracted << " files to: " << temp_dir << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Extracted " << extracted << " files to: " << temp_dir << std::endl;
     return extracted == static_cast<int>(sizeof(files) / sizeof(files[0]));
 }
 
@@ -360,10 +361,10 @@ void DriverInstaller::cleanupTempDir(const std::string& temp_dir) {
     try {
         if (std::filesystem::exists(temp_dir)) {
             std::filesystem::remove_all(temp_dir);
-            std::cout << "[DriverInstaller] Cleaned up temporary files" << std::endl;
+            moonmic::logInfo() << "[DriverInstaller] Cleaned up temporary files" << std::endl;
         }
     } catch (const std::exception& e) {
-        std::cerr << "[DriverInstaller] Failed to cleanup temp dir: " << e.what() << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to cleanup temp dir: " << e.what() << std::endl;
     }
 }
 
@@ -498,7 +499,7 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
         }
         enumerator->Release();
     } else {
-        std::cerr << "[DriverInstaller] Failed to create MMDeviceEnumerator: " << std::hex << hr << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to create MMDeviceEnumerator: " << std::hex << hr << std::endl;
     }
 
     if (!found) {
@@ -552,7 +553,7 @@ bool DriverInstaller::isSteamMicrophoneInstalled() {
 }
 
 bool DriverInstaller::extractEmbeddedSteamDriver(const std::string& temp_dir, bool is_x64) {
-    std::cout << "[DriverInstaller] Extracting embedded Steam driver files (" << (is_x64 ? "x64" : "x86") << ")..."
+    moonmic::logInfo() << "[DriverInstaller] Extracting embedded Steam driver files (" << (is_x64 ? "x64" : "x86") << ")..."
               << std::endl;
 
     std::filesystem::create_directories(temp_dir);
@@ -587,13 +588,13 @@ bool DriverInstaller::extractEmbeddedSteamDriver(const std::string& temp_dir, bo
 
 bool DriverInstaller::installSteamMicrophone() {
     if (isSteamMicrophoneInstalled()) {
-        std::cout << "[DriverInstaller] Steam Streaming Microphone is already installed. Skipping installation."
+        moonmic::logInfo() << "[DriverInstaller] Steam Streaming Microphone is already installed. Skipping installation."
                   << std::endl;
         return true;
     }
 
     if (!isRunningAsAdmin()) {
-        std::cerr << "[DriverInstaller] Administrator privileges required for Steam Driver" << std::endl;
+        moonmic::logError() << "[DriverInstaller] Administrator privileges required for Steam Driver" << std::endl;
         return false;
     }
 
@@ -609,13 +610,13 @@ bool DriverInstaller::installSteamMicrophone() {
 
     const bool extracted = extractEmbeddedSteamDriver(temp_dir_path, is_x64);
     if (!extracted) {
-        std::cerr << "[DriverInstaller] Failed to extract embedded Steam drivers." << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to extract embedded Steam drivers." << std::endl;
         std::string arch_dir = is_x64 ? "x64" : "x86";
         std::filesystem::path base_driver_dir =
             std::filesystem::path(driver_path_).parent_path() / "drivers" / "SVACDriver";
         temp_dir_path = (base_driver_dir / arch_dir).string();
 
-        std::cout << "[DriverInstaller] Fallback: Looking in " << temp_dir_path << std::endl;
+        moonmic::logInfo() << "[DriverInstaller] Fallback: Looking in " << temp_dir_path << std::endl;
     }
 
     std::filesystem::path driver_dir(temp_dir_path);
@@ -623,21 +624,21 @@ bool DriverInstaller::installSteamMicrophone() {
     std::filesystem::path mic_inf_path = driver_dir / "SteamStreamingMicrophone.inf";
 
     if (!std::filesystem::exists(mic_inf_path)) {
-        std::cerr << "[DriverInstaller] Steam Microphone INF not found at: " << mic_inf_path << std::endl;
+        moonmic::logError() << "[DriverInstaller] Steam Microphone INF not found at: " << mic_inf_path << std::endl;
         if (extracted) {
             cleanupTempDir(temp_dir_path);
         }
         return false;
     }
 
-    std::cout << "[DriverInstaller] Installing Steam Microphone from: " << mic_inf_path << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Installing Steam Microphone from: " << mic_inf_path << std::endl;
 
     std::string cmd = "pnputil /add-driver \"" + mic_inf_path.string() + "\"";
-    std::cout << "[DriverInstaller] Adding driver to store: " << cmd << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Adding driver to store: " << cmd << std::endl;
     system(cmd.c_str());
 
     if (isSteamMicrophoneInstalled()) {
-        std::cout << "[DriverInstaller] Device detected after adding driver." << std::endl;
+        moonmic::logInfo() << "[DriverInstaller] Device detected after adding driver." << std::endl;
         if (extracted) {
             cleanupTempDir(temp_dir_path);
         }
@@ -647,7 +648,7 @@ bool DriverInstaller::installSteamMicrophone() {
     }
 
     removeDevicesByHardwareId("STEAMSTREAMINGMICROPHONE");
-    std::cout << "[DriverInstaller] Creating root device node..." << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Creating root device node..." << std::endl;
     const bool success = createRootDevice("STEAMSTREAMINGMICROPHONE", mic_inf_path.string());
 
     if (extracted) {
@@ -655,25 +656,25 @@ bool DriverInstaller::installSteamMicrophone() {
     }
 
     if (success) {
-        std::cout << "[DriverInstaller] Steam Driver installed successfully." << std::endl;
+        moonmic::logInfo() << "[DriverInstaller] Steam Driver installed successfully." << std::endl;
 
         disableSteamStreamingSpeakers();
         return true;
     } else {
-        std::cerr << "[DriverInstaller] Installation failed." << std::endl;
+        moonmic::logError() << "[DriverInstaller] Installation failed." << std::endl;
         return false;
     }
 }
 
 bool DriverInstaller::uninstallSteamMicrophone() {
     if (!isRunningAsAdmin()) {
-        std::cerr << "[DriverInstaller] Administrator privileges required" << std::endl;
+        moonmic::logError() << "[DriverInstaller] Administrator privileges required" << std::endl;
         return false;
     }
 
-    std::cout << "[DriverInstaller] Uninstalling Steam Streaming Drivers..." << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Uninstalling Steam Streaming Drivers..." << std::endl;
 
-    std::cout << "[DriverInstaller] Removing PnP Device Nodes..." << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Removing PnP Device Nodes..." << std::endl;
     removeDevicesByHardwareId("STEAMSTREAMINGMICROPHONE");
 
     // Installed packages use an OEM INF name, which must be resolved before removal.
@@ -692,7 +693,7 @@ bool DriverInstaller::uninstallSteamMicrophone() {
     ps_args += ps_script;
     ps_args += "\"";
 
-    std::cout << "[DriverInstaller] Executing uninstall script..." << std::endl;
+    moonmic::logInfo() << "[DriverInstaller] Executing uninstall script..." << std::endl;
 
     SHELLEXECUTEINFOA sei = {};
     sei.cbSize = sizeof(sei);
@@ -703,7 +704,7 @@ bool DriverInstaller::uninstallSteamMicrophone() {
     sei.nShow = SW_HIDE;
 
     if (!ShellExecuteExA(&sei)) {
-        std::cerr << "[DriverInstaller] Failed to execute uninstall command" << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to execute uninstall command" << std::endl;
         return false;
     }
 
@@ -711,7 +712,7 @@ bool DriverInstaller::uninstallSteamMicrophone() {
         DWORD waitResult = WaitForSingleObject(sei.hProcess, 60000);
 
         if (waitResult == WAIT_TIMEOUT) {
-            std::cout << "[DriverInstaller] Uninstall command timed out (still running in background)" << std::endl;
+            moonmic::logInfo() << "[DriverInstaller] Uninstall command timed out (still running in background)" << std::endl;
             CloseHandle(sei.hProcess);
             return true;
         }
@@ -721,7 +722,7 @@ bool DriverInstaller::uninstallSteamMicrophone() {
         CloseHandle(sei.hProcess);
 
         if (exit_code == 0) {
-            std::cout << "[DriverInstaller] Uninstall completed successfully" << std::endl;
+            moonmic::logInfo() << "[DriverInstaller] Uninstall completed successfully" << std::endl;
             return true;
         }
     }
@@ -734,20 +735,20 @@ bool DriverInstaller::createRootDevice(const std::string& hardwareId, const std:
     char className[MAX_CLASS_NAME_LEN];
 
     if (!SetupDiGetINFClassA(infPath.c_str(), &classGuid, className, MAX_CLASS_NAME_LEN, NULL)) {
-        std::cerr << "[DriverInstaller] Failed to get class GUID from INF. Error: " << GetLastError() << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to get class GUID from INF. Error: " << GetLastError() << std::endl;
         return false;
     }
 
     HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(&classGuid, NULL);
     if (hDevInfo == INVALID_HANDLE_VALUE) {
-        std::cerr << "[DriverInstaller] Failed to create device info list. Error: " << GetLastError() << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to create device info list. Error: " << GetLastError() << std::endl;
         return false;
     }
 
     SP_DEVINFO_DATA devInfoData;
     devInfoData.cbSize = sizeof(SP_DEVINFO_DATA);
     if (!SetupDiCreateDeviceInfoA(hDevInfo, className, &classGuid, NULL, NULL, DICD_GENERATE_ID, &devInfoData)) {
-        std::cerr << "[DriverInstaller] Failed to create device info. Error: " << GetLastError() << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to create device info. Error: " << GetLastError() << std::endl;
         SetupDiDestroyDeviceInfoList(hDevInfo);
         return false;
     }
@@ -758,13 +759,13 @@ bool DriverInstaller::createRootDevice(const std::string& hardwareId, const std:
 
     if (!SetupDiSetDeviceRegistryPropertyA(hDevInfo, &devInfoData, SPDRP_HARDWAREID, (const BYTE*)hwIdBuffer.data(),
                                            (DWORD)hwIdBuffer.size())) {
-        std::cerr << "[DriverInstaller] Failed to set Hardware ID. Error: " << GetLastError() << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to set Hardware ID. Error: " << GetLastError() << std::endl;
         SetupDiDestroyDeviceInfoList(hDevInfo);
         return false;
     }
 
     if (!SetupDiCallClassInstaller(DIF_REGISTERDEVICE, hDevInfo, &devInfoData)) {
-        std::cerr << "[DriverInstaller] Failed to register device. Error: " << GetLastError() << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to register device. Error: " << GetLastError() << std::endl;
         SetupDiDestroyDeviceInfoList(hDevInfo);
         return false;
     }
@@ -777,12 +778,12 @@ bool DriverInstaller::createRootDevice(const std::string& hardwareId, const std:
 
     if (!result) {
         DWORD err = GetLastError();
-        std::cerr << "[DriverInstaller] UpdateDriverForPlugAndPlayDevices failed: " << err << std::endl;
+        moonmic::logError() << "[DriverInstaller] UpdateDriverForPlugAndPlayDevices failed: " << err << std::endl;
 
-        std::cerr << "[DriverInstaller] Cleaning up failed device creation..." << std::endl;
+        moonmic::logError() << "[DriverInstaller] Cleaning up failed device creation..." << std::endl;
         SetupDiCallClassInstaller(DIF_REMOVE, hDevInfo, &devInfoData);
     } else {
-        std::cout << "[DriverInstaller] Root device created and driver installed." << std::endl;
+        moonmic::logInfo() << "[DriverInstaller] Root device created and driver installed." << std::endl;
     }
 
     SetupDiDestroyDeviceInfoList(hDevInfo);
@@ -817,7 +818,7 @@ void DriverInstaller::removeDevicesByHardwareId(const std::string& hardwareId) {
             }
 
             if (match) {
-                std::cout << "[DriverInstaller] Removing existing device with ID: " << hardwareId << std::endl;
+                moonmic::logInfo() << "[DriverInstaller] Removing existing device with ID: " << hardwareId << std::endl;
                 SetupDiCallClassInstaller(DIF_REMOVE, hDevInfo, &devInfoData);
 
                 i = -1;
@@ -840,7 +841,7 @@ bool DriverInstaller::disableSteamStreamingSpeakers() {
     hr = CoCreateInstance(CLSID_PolicyConfig, NULL, CLSCTX_ALL, IID_IPolicyConfig, (void**)&policyConfig);
     if (FAILED(hr)) {
         enumerator->Release();
-        std::cerr << "[DriverInstaller] Failed to create IPolicyConfig" << std::endl;
+        moonmic::logError() << "[DriverInstaller] Failed to create IPolicyConfig" << std::endl;
         return false;
     }
 
@@ -875,11 +876,11 @@ bool DriverInstaller::disableSteamStreamingSpeakers() {
 
                                 hr = policyConfig->SetEndpointVisibility(id, 0);
                                 if (SUCCEEDED(hr)) {
-                                    std::cout << "[DriverInstaller] Successfully disabled playback endpoint."
+                                    moonmic::logInfo() << "[DriverInstaller] Successfully disabled playback endpoint."
                                               << std::endl;
                                     found = true;
                                 } else {
-                                    std::cerr << "[DriverInstaller] Failed to disable endpoint. HR=" << std::hex << hr
+                                    moonmic::logError() << "[DriverInstaller] Failed to disable endpoint. HR=" << std::hex << hr
                                               << std::endl;
                                 }
                                 CoTaskMemFree(id);

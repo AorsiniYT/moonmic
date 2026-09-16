@@ -35,7 +35,7 @@ DWORD WINAPI monitorThread(LPVOID parameter) {
     while (InterlockedCompareExchange(&monitor->running, 0, 0)) {
         const ULONGLONG now = getTimeMs();
         if (now - last_sent_ping >= ping_interval_ms) {
-            uint8_t packet[sizeof(moonmic_ping_packet_t)];
+            uint8_t packet[MOONMIC_PING_SIZE];
             moonmic_write_ping_le(packet, MOONMIC_PING_MAGIC, now);
             sendto(monitor->socket, reinterpret_cast<const char*>(packet), sizeof(packet), 0,
                    reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
@@ -46,13 +46,12 @@ DWORD WINAPI monitorThread(LPVOID parameter) {
         if (received >= static_cast<int>(sizeof(uint32_t))) {
             const uint32_t magic = moonmic_read_u32_le(buffer);
 
-            if (received == sizeof(moonmic_ping_packet_t) &&
-                (magic == MOONMIC_PING_MAGIC || magic == MOONMIC_PONG_MAGIC)) {
+            if (received == MOONMIC_PING_SIZE && (magic == MOONMIC_PING_MAGIC || magic == MOONMIC_PONG_MAGIC)) {
                 monitor->last_packet_time = getTimeMs();
                 InterlockedExchange(&monitor->status, MOONMIC_CONNECTED);
 
                 if (magic == MOONMIC_PING_MAGIC) {
-                    uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                    uint8_t pong[MOONMIC_PING_SIZE];
                     moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(buffer));
                     sendto(monitor->socket, reinterpret_cast<const char*>(pong), sizeof(pong), 0,
                            reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
@@ -62,9 +61,9 @@ DWORD WINAPI monitorThread(LPVOID parameter) {
                         InterlockedExchange(&monitor->current_rtt, static_cast<LONG>(elapsed));
                     }
                 }
-            } else if (received == sizeof(moonmic_control_packet_t) && magic == MOONMIC_CTRL_STOP) {
+            } else if (received == MOONMIC_CONTROL_SIZE && magic == MOONMIC_CTRL_STOP) {
                 InterlockedExchange(&monitor->paused, 1);
-            } else if (received == sizeof(moonmic_control_packet_t) && magic == MOONMIC_CTRL_START) {
+            } else if (received == MOONMIC_CONTROL_SIZE && magic == MOONMIC_CTRL_START) {
                 InterlockedExchange(&monitor->paused, 0);
             }
         }

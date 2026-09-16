@@ -4,9 +4,12 @@
 #include "moonmic_debug.h"
 #include "heartbeat_monitor.h"
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <memory>
+#include <new>
 
 #ifdef __vita__
 #include <psp2/kernel/processmgr.h>
@@ -19,6 +22,9 @@
 #endif
 
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 
 struct MoonmicThreadContext {
@@ -30,7 +36,7 @@ static DWORD WINAPI moonmic_windows_thread(LPVOID argument) {
     auto* context = static_cast<MoonmicThreadContext*>(argument);
     auto function = context->function;
     void* function_argument = context->argument;
-    free(context);
+    delete context;
     function(function_argument);
     return 0;
 }
@@ -40,128 +46,141 @@ static DWORD WINAPI moonmic_windows_thread(LPVOID argument) {
 #include <sys/time.h>
 #endif
 
-static void* moonmic_worker_thread(void* arg) {
-    moonmic_client_t* client = (moonmic_client_t*)arg;
+using HandshakeWire = std::array<uint8_t, MOONMIC_HANDSHAKE_SIZE>;
 
-    moonmic_handshake_t handshake = {};
+static void sleepMilliseconds(unsigned int milliseconds) {
+#ifdef _WIN32
+    Sleep(milliseconds);
+#else
+    usleep(milliseconds * 1000);
+#endif
+}
+
+static HandshakeWire buildHandshake(const moonmic_client_t* client) {
+    moonmic_handshake_t handshake{};
     handshake.magic = MOONMIC_HANDSHAKE_MAGIC;
     handshake.version = MOONMIC_PROTOCOL_VERSION;
     handshake.pair_status = client->config.pair_status;
-
     handshake.display_width = client->config.target_display_width;
     handshake.display_height = client->config.target_display_height;
 
     if (client->config.uniqueid && client->config.uniqueid[0]) {
-        handshake.uniqueid_len = (uint8_t)strlen(client->config.uniqueid);
-        if (handshake.uniqueid_len > 16) handshake.uniqueid_len = 16;
+        handshake.uniqueid_len = static_cast<uint8_t>(
+            std::min(strlen(client->config.uniqueid), static_cast<size_t>(MOONMIC_UNIQUE_ID_CAPACITY)));
         memcpy(handshake.uniqueid, client->config.uniqueid, handshake.uniqueid_len);
     }
-
     if (client->config.devicename && client->config.devicename[0]) {
-        handshake.devicename_len = (uint8_t)strlen(client->config.devicename);
-        if (handshake.devicename_len > 64) handshake.devicename_len = 64;
+        handshake.devicename_len = static_cast<uint8_t>(
+            std::min(strlen(client->config.devicename), static_cast<size_t>(MOONMIC_DEVICE_NAME_CAPACITY)));
         memcpy(handshake.devicename, client->config.devicename, handshake.devicename_len);
     }
 
-    uint8_t handshake_wire[sizeof(moonmic_handshake_t)];
-    moonmic_write_handshake_le(handshake_wire, &handshake);
+    HandshakeWire wire{};
+    moonmic_write_handshake_le(wire.data(), &handshake);
+    return wire;
+}
 
-    if (udp_sender_send(client->sender, handshake_wire, sizeof(handshake_wire))) {
-        MOONMIC_LOG("[moonmic_worker] Handshake sent: device='%s', uniqueid_len=%d, resolution=%dx%d",
-                    client->config.devicename ? client->config.devicename : "unknown", handshake.uniqueid_len,
-                    handshake.display_width, handshake.display_height);
-    } else {
-        MOONMIC_LOG("[moonmic_worker] WARNING: Failed to send handshake");
+static bool sendHandshake(moonmic_client_t* client, const HandshakeWire& handshake, bool announce) {
+    const bool sent = udp_sender_send(client->sender, handshake.data(), handshake.size());
+    if (announce) {
+        if (sent) {
+            MOONMIC_LOG("[moonmic_worker] Handshake sent: device='%s', resolution=%dx%d",
+                        client->config.devicename ? client->config.devicename : "unknown",
+                        client->config.target_display_width, client->config.target_display_height);
+        } else {
+            MOONMIC_LOG("[moonmic_worker] WARNING: Failed to send handshake");
+        }
     }
+    return sent;
+}
+
+struct HostConnectionState {
+    bool was_connected = true;
+    uint64_t last_probe_time = 0;
+    int probe_count = 0;
+};
+
+static bool hostReadyForAudio(moonmic_client_t* client, HostConnectionState& state, const HandshakeWire& handshake) {
+    if (!client->heartbeat_monitor) return true;
+
+    const bool connected = heartbeat_monitor_is_connected(client->heartbeat_monitor);
+    if (!connected && state.was_connected) {
+        MOONMIC_LOG("[moonmic_worker] Host disconnected - probing every 3 seconds");
+        state.was_connected = false;
+        state.last_probe_time = 0;
+        state.probe_count = 0;
+    }
+
+    if (!connected) {
+        const uint64_t now = moonmic_get_timestamp_us() / 1000;
+        if (now - state.last_probe_time >= 3000) {
+            ++state.probe_count;
+            sendHandshake(client, handshake, false);
+            MOONMIC_LOG("[moonmic_worker] Probe #%d: waiting for host...", state.probe_count);
+            state.last_probe_time = now;
+        }
+        sleepMilliseconds(200);
+        return false;
+    }
+
+    if (!state.was_connected) {
+        MOONMIC_LOG("[moonmic_worker] Host is back online - resuming transmission");
+        sendHandshake(client, handshake, true);
+        state.was_connected = true;
+        state.probe_count = 0;
+    }
+
+    if (heartbeat_monitor_is_paused(client->heartbeat_monitor)) {
+        sleepMilliseconds(100);
+        return false;
+    }
+    return true;
+}
+
+static void applyGain(float* samples, size_t sample_count, float gain) {
+    for (size_t index = 0; index < sample_count; ++index) {
+        samples[index] = std::clamp(samples[index] * gain, -1.0f, 1.0f);
+    }
+}
+
+static void sendAudioPacket(moonmic_client_t* client, uint8_t* packet, size_t payload_size, uint32_t sample_rate) {
+    moonmic_write_packet_header(packet, udp_sender_next_sequence(client->sender), moonmic_get_timestamp_us(),
+                                sample_rate);
+    udp_sender_send(client->sender, packet, MOONMIC_HEADER_SIZE + payload_size);
+}
+
+static void* moonmic_worker_thread(void* arg) {
+    auto* client = static_cast<moonmic_client_t*>(arg);
+    const HandshakeWire handshake = buildHandshake(client);
+    sendHandshake(client, handshake, true);
 
     const int frame_size = PLATFORM_GRAIN_SIZE;
     const size_t buffer_size = static_cast<size_t>(frame_size) * client->config.channels;
-    float* pcm_buffer = (float*)malloc(buffer_size * sizeof(float));
-    uint8_t* opus_buffer = (uint8_t*)malloc(PLATFORM_OPUS_BUFFER_SIZE);
+    auto pcm_buffer = std::unique_ptr<float[]>(new (std::nothrow) float[buffer_size]);
+    auto opus_buffer = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[PLATFORM_OPUS_BUFFER_SIZE]);
 
     if (!pcm_buffer || !opus_buffer) {
         if (client->error_callback) {
             client->error_callback("Failed to allocate buffers", client->error_userdata);
         }
-        free(pcm_buffer);
-        free(opus_buffer);
         return NULL;
     }
 
     MOONMIC_LOG("[moonmic_worker] Thread started - beginning capture loop");
-    bool was_connected = true;
-    uint64_t last_probe_time = 0;
-    int probe_count = 0;
+    HostConnectionState connection;
 
-    const uint64_t PROBE_INTERVAL_MS = 3000;
-
-    float* dump_buffer = (float*)malloc(buffer_size * sizeof(float));
-    if (dump_buffer) {
-        MOONMIC_LOG("[moonmic_worker] Flushing audio buffer...");
-        for (int i = 0; i < 10; i++) {
-            int read = client->capture->read(client->capture, dump_buffer, frame_size);
-            if (read <= 0) break;
-        }
-        free(dump_buffer);
-        MOONMIC_LOG("[moonmic_worker] Flush complete.");
+    MOONMIC_LOG("[moonmic_worker] Flushing audio buffer...");
+    for (int i = 0; i < 10; i++) {
+        int read = client->capture->read(client->capture, pcm_buffer.get(), frame_size);
+        if (read <= 0) break;
     }
+    MOONMIC_LOG("[moonmic_worker] Flush complete.");
 
     while (client->running) {
 
-        if (client->heartbeat_monitor) {
-            bool is_connected = heartbeat_monitor_is_connected(client->heartbeat_monitor);
+        if (!hostReadyForAudio(client, connection, handshake)) continue;
 
-            if (!is_connected && was_connected) {
-
-                MOONMIC_LOG("[moonmic_worker] Host disconnected - entering suspension mode");
-                MOONMIC_LOG("[moonmic_worker] Probing for host every 3 seconds...");
-                was_connected = false;
-                last_probe_time = 0;
-                probe_count = 0;
-            }
-
-            if (!is_connected) {
-
-                uint64_t now = moonmic_get_timestamp_us() / 1000;
-
-                if (now - last_probe_time >= PROBE_INTERVAL_MS) {
-                    probe_count++;
-
-                    udp_sender_send(client->sender, handshake_wire, sizeof(handshake_wire));
-                    MOONMIC_LOG("[moonmic_worker] Probe #%d: waiting for host...", probe_count);
-                    last_probe_time = now;
-                }
-
-#ifdef _WIN32
-                Sleep(200);
-#else
-                usleep(200000);
-#endif
-                continue;
-            }
-
-            if (is_connected && !was_connected) {
-
-                MOONMIC_LOG("[moonmic_worker] Host is back online! Resuming transmission...");
-                if (udp_sender_send(client->sender, handshake_wire, sizeof(handshake_wire))) {
-                    MOONMIC_LOG("[moonmic_worker] Handshake sent - resuming audio");
-                }
-                was_connected = true;
-                probe_count = 0;
-            }
-
-            if (is_connected && heartbeat_monitor_is_paused(client->heartbeat_monitor)) {
-
-#ifdef _WIN32
-                Sleep(100);
-#else
-                usleep(100000);
-#endif
-                continue;
-            }
-        }
-
-        int frames_read = client->capture->read(client->capture, pcm_buffer, frame_size);
+        int frames_read = client->capture->read(client->capture, pcm_buffer.get(), frame_size);
 
         if (frames_read < 0) {
             if (client->error_callback) {
@@ -172,62 +191,38 @@ static void* moonmic_worker_thread(void* arg) {
 
         if (frames_read == 0) {
 
-#ifdef _WIN32
-            Sleep(1);
-#else
-            usleep(1000);
-#endif
+            sleepMilliseconds(1);
             continue;
         }
 
         if (client->config.raw_mode) {
 
-            const float GAIN = client->config.gain;
-            for (int i = 0; i < frames_read * client->config.channels; i++) {
-                pcm_buffer[i] *= GAIN;
-
-                if (pcm_buffer[i] > 1.0f) pcm_buffer[i] = 1.0f;
-                if (pcm_buffer[i] < -1.0f) pcm_buffer[i] = -1.0f;
-            }
-
             const size_t sample_count = static_cast<size_t>(frames_read) * client->config.channels;
-            uint8_t* pcm_output = opus_buffer + MOONMIC_HEADER_SIZE;
+            applyGain(pcm_buffer.get(), sample_count, client->config.gain);
+            uint8_t* pcm_output = opus_buffer.get() + MOONMIC_HEADER_SIZE;
             for (size_t i = 0; i < sample_count; i++) {
                 int16_t sample = static_cast<int16_t>(pcm_buffer[i] * 32767.0f);
                 moonmic_write_u16_le(pcm_output + (i * sizeof(sample)), static_cast<uint16_t>(sample));
             }
             size_t encoded_bytes = sample_count * sizeof(int16_t);
-            uint32_t packet_sample_rate = client->config.sample_rate | MOONMIC_RAW_FLAG;
-            uint32_t seq = udp_sender_next_sequence(client->sender);
-            uint64_t ts = moonmic_get_timestamp_us();
-            moonmic_write_packet_header(opus_buffer, seq, ts, packet_sample_rate);
-
-            size_t total_size = MOONMIC_HEADER_SIZE + encoded_bytes;
-            udp_sender_send(client->sender, opus_buffer, total_size);
+            sendAudioPacket(client, opus_buffer.get(), encoded_bytes, client->config.sample_rate | MOONMIC_RAW_FLAG);
             continue;
         }
 
         const size_t samples_to_copy = static_cast<size_t>(frames_read) * client->config.channels;
         const size_t space_available =
             (client->target_frame_size - client->accumulated_samples) * client->config.channels;
-        const float gain = client->config.gain;
-
-        for (size_t i = 0; i < samples_to_copy; i++) {
-            pcm_buffer[i] *= gain;
-
-            if (pcm_buffer[i] > 1.0f) pcm_buffer[i] = 1.0f;
-            if (pcm_buffer[i] < -1.0f) pcm_buffer[i] = -1.0f;
-        }
+        applyGain(pcm_buffer.get(), samples_to_copy, client->config.gain);
 
         if (samples_to_copy <= space_available) {
 
-            memcpy(client->accumulation_buffer + client->accumulated_samples * client->config.channels, pcm_buffer,
-                   samples_to_copy * sizeof(float));
+            memcpy(client->accumulation_buffer.get() + client->accumulated_samples * client->config.channels,
+                   pcm_buffer.get(), samples_to_copy * sizeof(float));
             client->accumulated_samples += frames_read;
         } else {
             const size_t samples_fitting = space_available;
-            memcpy(client->accumulation_buffer + client->accumulated_samples * client->config.channels, pcm_buffer,
-                   samples_fitting * sizeof(float));
+            memcpy(client->accumulation_buffer.get() + client->accumulated_samples * client->config.channels,
+                   pcm_buffer.get(), samples_fitting * sizeof(float));
             client->accumulated_samples += samples_fitting / client->config.channels;
         }
 
@@ -240,8 +235,8 @@ static void* moonmic_worker_thread(void* arg) {
 
         if (client->accumulated_samples >= client->target_frame_size) {
             int encoded_bytes = moonmic_opus_encoder_encode(
-                client->encoder, client->accumulation_buffer, static_cast<int>(client->target_frame_size),
-                opus_buffer + MOONMIC_HEADER_SIZE, PLATFORM_OPUS_BUFFER_SIZE - MOONMIC_HEADER_SIZE);
+                client->encoder, client->accumulation_buffer.get(), static_cast<int>(client->target_frame_size),
+                opus_buffer.get() + MOONMIC_HEADER_SIZE, PLATFORM_OPUS_BUFFER_SIZE - MOONMIC_HEADER_SIZE);
 
             if (encoded_bytes < 0) {
                 if (client->error_callback) {
@@ -251,25 +246,18 @@ static void* moonmic_worker_thread(void* arg) {
                 continue;
             }
 
-            uint32_t packet_sample_rate = client->config.sample_rate;
-            uint32_t seq = udp_sender_next_sequence(client->sender);
-            uint64_t ts = moonmic_get_timestamp_us();
-            moonmic_write_packet_header(opus_buffer, seq, ts, packet_sample_rate);
-
-            size_t total_size = MOONMIC_HEADER_SIZE + encoded_bytes;
-            udp_sender_send(client->sender, opus_buffer, total_size);
+            sendAudioPacket(client, opus_buffer.get(), static_cast<size_t>(encoded_bytes), client->config.sample_rate);
 
             client->accumulated_samples = 0;
 
             if (samples_leftover > 0) {
-                memcpy(client->accumulation_buffer, pcm_buffer + leftover_offset, samples_leftover * sizeof(float));
+                memcpy(client->accumulation_buffer.get(), pcm_buffer.get() + leftover_offset,
+                       samples_leftover * sizeof(float));
                 client->accumulated_samples = samples_leftover / client->config.channels;
             }
         }
     }
 
-    free(pcm_buffer);
-    free(opus_buffer);
     return NULL;
 }
 
@@ -281,7 +269,7 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
 
     MOONMIC_LOG("[moonmic_create] Creating client for %s:%d", config->host_ip, config->port);
 
-    moonmic_client_t* client = (moonmic_client_t*)calloc(1, sizeof(moonmic_client_t));
+    auto* client = new (std::nothrow) moonmic_client_t();
     if (!client) {
         MOONMIC_LOG("[moonmic_create] ERROR: Failed to allocate client memory");
         return NULL;
@@ -308,10 +296,6 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
     MOONMIC_LOG("[moonmic_create] Copied strings: uniqueid='%s', devicename='%s'",
                 client->config.uniqueid ? client->config.uniqueid : "(null)",
                 client->config.devicename ? client->config.devicename : "(null)");
-
-    client->accumulation_buffer = NULL;
-    client->accumulated_samples = 0;
-    client->target_frame_size = 0;
 
     if (client->config.port == 0) {
         client->config.port = MOONMIC_DEFAULT_PORT;
@@ -351,7 +335,7 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
 
     if (!client->capture) {
         MOONMIC_LOG("[moonmic_create] ERROR: Failed to create audio capture");
-        free(client);
+        delete client;
         return NULL;
     }
 
@@ -361,7 +345,7 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
         MOONMIC_LOG("[moonmic_create] ERROR: Failed to initialize audio capture");
         client->capture->close(client->capture);
         free(client->capture);
-        free(client);
+        delete client;
         return NULL;
     }
 
@@ -369,7 +353,7 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
     if (encoder_sample_rate == 0) {
         client->capture->close(client->capture);
         free(client->capture);
-        free(client);
+        delete client;
         return NULL;
     }
     client->config.sample_rate = encoder_sample_rate;
@@ -390,7 +374,7 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
             MOONMIC_LOG("[moonmic_create] ERROR: Failed to create Opus encoder");
             client->capture->close(client->capture);
             free(client->capture);
-            free(client);
+            delete client;
             return NULL;
         }
     }
@@ -418,13 +402,12 @@ moonmic_client_t* moonmic_create(const moonmic_config_t* config) {
 
     if (!client->config.raw_mode) {
         size_t buffer_size = client->target_frame_size * client->config.channels;
-        client->accumulation_buffer = (float*)malloc(buffer_size * sizeof(float));
+        client->accumulation_buffer.reset(new (std::nothrow) float[buffer_size]());
         if (!client->accumulation_buffer) {
             MOONMIC_LOG("[moonmic_create] ERROR: Failed to allocate accumulation buffer");
             moonmic_destroy(client);
             return NULL;
         }
-        memset(client->accumulation_buffer, 0, buffer_size * sizeof(float));
         MOONMIC_LOG("[moonmic_create] Allocated accumulation buffer: %zu samples", buffer_size);
     }
 
@@ -462,11 +445,7 @@ void moonmic_destroy(moonmic_client_t* client) {
         free(client->capture);
     }
 
-    if (client->accumulation_buffer) {
-        free(client->accumulation_buffer);
-    }
-
-    free(client);
+    delete client;
     MOONMIC_LOG("[moonmic_destroy] Client destroyed");
 }
 
@@ -548,7 +527,7 @@ uint64_t moonmic_get_timestamp_us(void) {
 
 void* moonmic_thread_create(void* (*func)(void*), void* arg) {
 #ifdef _WIN32
-    auto* context = static_cast<MoonmicThreadContext*>(malloc(sizeof(MoonmicThreadContext)));
+    auto* context = new (std::nothrow) MoonmicThreadContext();
     if (!context) {
         return NULL;
     }
@@ -557,16 +536,16 @@ void* moonmic_thread_create(void* (*func)(void*), void* arg) {
     context->argument = arg;
     HANDLE thread = CreateThread(NULL, 0, moonmic_windows_thread, context, 0, NULL);
     if (!thread) {
-        free(context);
+        delete context;
     }
     return (void*)thread;
 #else
-    pthread_t* thread = (pthread_t*)malloc(sizeof(pthread_t));
+    auto* thread = new (std::nothrow) pthread_t;
     if (!thread) {
         return NULL;
     }
     if (pthread_create(thread, NULL, func, arg) != 0) {
-        free(thread);
+        delete thread;
         return NULL;
     }
     return thread;
@@ -581,9 +560,9 @@ void moonmic_thread_join(void* thread_handle) {
     WaitForSingleObject((HANDLE)thread_handle, INFINITE);
     CloseHandle((HANDLE)thread_handle);
 #else
-    pthread_t* thread = (pthread_t*)thread_handle;
+    auto* thread = static_cast<pthread_t*>(thread_handle);
     pthread_join(*thread, NULL);
-    free(thread);
+    delete thread;
 #endif
 }
 

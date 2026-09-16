@@ -40,10 +40,10 @@ static void* monitorThread(void* parameter) {
     while (__sync_fetch_and_add(&monitor->running, 0)) {
         const uint64_t now = getTimeMs();
         if (now - last_sent_ping >= ping_interval_ms) {
-            uint8_t packet[sizeof(moonmic_ping_packet_t)];
+            uint8_t packet[MOONMIC_PING_SIZE];
             moonmic_write_ping_le(packet, MOONMIC_PING_MAGIC, now);
-            sendto(monitor->socket, packet, sizeof(packet), 0,
-                   reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
+            sendto(monitor->socket, packet, sizeof(packet), 0, reinterpret_cast<const sockaddr*>(&monitor->destination),
+                   sizeof(monitor->destination));
             last_sent_ping = now;
         }
 
@@ -51,13 +51,12 @@ static void* monitorThread(void* parameter) {
         if (received >= static_cast<ssize_t>(sizeof(uint32_t))) {
             const uint32_t magic = moonmic_read_u32_le(buffer);
 
-            if (received == sizeof(moonmic_ping_packet_t) &&
-                (magic == MOONMIC_PING_MAGIC || magic == MOONMIC_PONG_MAGIC)) {
+            if (received == MOONMIC_PING_SIZE && (magic == MOONMIC_PING_MAGIC || magic == MOONMIC_PONG_MAGIC)) {
                 monitor->last_packet_time = getTimeMs();
                 __sync_lock_test_and_set(&monitor->status, MOONMIC_CONNECTED);
 
                 if (magic == MOONMIC_PING_MAGIC) {
-                    uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                    uint8_t pong[MOONMIC_PING_SIZE];
                     moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(buffer));
                     sendto(monitor->socket, pong, sizeof(pong), 0,
                            reinterpret_cast<const sockaddr*>(&monitor->destination), sizeof(monitor->destination));
@@ -67,9 +66,9 @@ static void* monitorThread(void* parameter) {
                         __sync_lock_test_and_set(&monitor->current_rtt, static_cast<int>(elapsed));
                     }
                 }
-            } else if (received == sizeof(moonmic_control_packet_t) && magic == MOONMIC_CTRL_STOP) {
+            } else if (received == MOONMIC_CONTROL_SIZE && magic == MOONMIC_CTRL_STOP) {
                 __sync_lock_test_and_set(&monitor->paused, 1);
-            } else if (received == sizeof(moonmic_control_packet_t) && magic == MOONMIC_CTRL_START) {
+            } else if (received == MOONMIC_CONTROL_SIZE && magic == MOONMIC_CTRL_START) {
                 __sync_lock_test_and_set(&monitor->paused, 0);
             }
         }

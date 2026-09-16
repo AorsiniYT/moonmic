@@ -86,9 +86,8 @@ const char* SUNSHINE_WEBUI = "Access Sunshine's Web Interface for advanced confi
                              "Login is required to allow Moonmic to change host resolution\n"
                              "to match the PS Vita client (e.g. 960x544 or 1280x720).";
 
-const char* RELOAD_SUNSHINE = "Reload Sunshine configuration and client list.\n"
-                              "Use this if you've just paired a new device or changed\n"
-                              "Sunshine settings externally.";
+const char* RELOAD_SUNSHINE = "Reload the paired client list from Sunshine WebUI.\n"
+                              "Use this after pairing a new device.";
 
 const char* GUARDIAN_STATUS = "Guardian Watchdog Status.\n"
                               "The Guardian is a separate process that monitors this app.\n"

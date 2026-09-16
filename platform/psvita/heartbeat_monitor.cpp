@@ -59,7 +59,7 @@ static int monitor_thread_func(SceSize args, void* argp) {
 
         uint64_t now = get_time_ms();
         if (now - last_sent_ping >= 1000) {
-            uint8_t packet[sizeof(moonmic_ping_packet_t)];
+            uint8_t packet[MOONMIC_PING_SIZE];
             moonmic_write_ping_le(packet, MOONMIC_PING_MAGIC, now);
 
             sendto(monitor->socket, packet, sizeof(packet), 0, (struct sockaddr*)&monitor->dest_addr,
@@ -76,17 +76,17 @@ static int monitor_thread_func(SceSize args, void* argp) {
             if (received >= 4) {
                 const uint32_t magic = moonmic_read_u32_le(buffer);
 
-                if (magic == MOONMIC_PING_MAGIC && received == sizeof(moonmic_ping_packet_t)) {
+                if (magic == MOONMIC_PING_MAGIC && received == MOONMIC_PING_SIZE) {
 
                     monitor->last_ping_time = get_time_ms();
                     monitor->status = MOONMIC_CONNECTED;
 
-                    uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                    uint8_t pong[MOONMIC_PING_SIZE];
                     moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(buffer));
 
                     sendto(monitor->socket, pong, sizeof(pong), 0, (struct sockaddr*)&monitor->dest_addr,
                            sizeof(monitor->dest_addr));
-                } else if (magic == MOONMIC_PONG_MAGIC && received == sizeof(moonmic_ping_packet_t)) {
+                } else if (magic == MOONMIC_PONG_MAGIC && received == MOONMIC_PING_SIZE) {
 
                     monitor->last_ping_time = get_time_ms();
                     monitor->status = MOONMIC_CONNECTED;

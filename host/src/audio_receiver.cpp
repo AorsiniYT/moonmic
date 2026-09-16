@@ -1,9 +1,8 @@
+#include "logger.h"
 
 #include "audio_receiver.h"
 #include "debug.h"
 #include "typing_focus.h"
-#include <iostream>
-#include <cstring>
 #include <limits>
 #include <vector>
 
@@ -14,7 +13,7 @@
 namespace moonmic {
 
 AudioReceiver::AudioReceiver()
-    : sunshine_(nullptr), decoder_(nullptr), receiver_(nullptr), virtual_device_(nullptr), connection_monitor_(nullptr),
+    : decoder_(nullptr), receiver_(nullptr), virtual_device_(nullptr), connection_monitor_(nullptr),
       running_(false), paused_(false), client_validated_(false), detected_stream_rate_(0), system_sample_rate_(0) {
 }
 
@@ -42,10 +41,10 @@ void AudioReceiver::resetConnectionState() {
         std::string output_device = config_.audio.use_speaker_mode ? "" : config_.audio.recording_endpoint_name;
 
         if (!virtual_device_->init(output_device, 0, config_.audio.channels)) {
-            std::cerr << "[AudioReceiver] Failed to recreate virtual device on reset" << std::endl;
+            moonmic::logError() << "[AudioReceiver] Failed to recreate virtual device on reset" << std::endl;
         } else {
             system_sample_rate_ = virtual_device_->getSampleRate();
-            std::cout << "[AudioReceiver] Audio device reset. Rate: " << system_sample_rate_ << "Hz" << std::endl;
+            moonmic::logInfo() << "[AudioReceiver] Audio device reset. Rate: " << system_sample_rate_ << "Hz" << std::endl;
         }
     }
 
@@ -59,7 +58,7 @@ bool AudioReceiver::start(const Config& config) {
         return false;
     }
     if (config.audio.channels < 1 || config.audio.channels > 2) {
-        std::cerr << "[AudioReceiver] Unsupported channel count: " << config.audio.channels << std::endl;
+        moonmic::logError() << "[AudioReceiver] Unsupported channel count: " << config.audio.channels << std::endl;
         return false;
     }
 
@@ -79,19 +78,19 @@ bool AudioReceiver::start(const Config& config) {
         config_.audio.use_speaker_mode ? "speakers (debug)" : config_.audio.recording_endpoint_name;
 
     if (!virtual_device_->init(output_device, 0, config_.audio.channels)) {
-        std::cerr << "[AudioReceiver] Failed to initialize audio device" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Failed to initialize audio device" << std::endl;
         virtual_device_.reset();
         return false;
     }
 
     system_sample_rate_ = virtual_device_->getSampleRate();
     if (system_sample_rate_ > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
-        std::cerr << "[AudioReceiver] Unsupported output sample rate: " << system_sample_rate_ << std::endl;
+        moonmic::logError() << "[AudioReceiver] Unsupported output sample rate: " << system_sample_rate_ << std::endl;
         virtual_device_->close();
         virtual_device_.reset();
         return false;
     }
-    std::cout << "[AudioReceiver] Audio output: " << output_mode << " @ " << system_sample_rate_ << "Hz (auto-detected)"
+    moonmic::logInfo() << "[AudioReceiver] Audio output: " << output_mode << " @ " << system_sample_rate_ << "Hz (auto-detected)"
               << std::endl;
 
     int decoder_rate =
@@ -99,13 +98,13 @@ bool AudioReceiver::start(const Config& config) {
 
     decoder_ = std::make_unique<FFmpegDecoder>();
     if (!decoder_->init(decoder_rate, config_.audio.channels)) {
-        std::cerr << "[AudioReceiver] Failed to initialize FFmpeg Opus decoder" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Failed to initialize FFmpeg Opus decoder" << std::endl;
         decoder_.reset();
         virtual_device_->close();
         virtual_device_.reset();
         return false;
     }
-    std::cout << "[AudioReceiver] FFmpeg Opus decoder initialized at " << decoder_rate << "Hz" << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] FFmpeg Opus decoder initialized at " << decoder_rate << "Hz" << std::endl;
 
     if (config_.audio.resampling_rate == 0) {
         config_.audio.resampling_rate = decoder_rate;
@@ -118,7 +117,7 @@ bool AudioReceiver::start(const Config& config) {
                                         bool is_lagging) { onPacketReceived(data, size, ip, port, is_lagging); });
 
     if (!receiver_->start(config_.server.port, config_.server.bind_address)) {
-        std::cerr << "[AudioReceiver] Failed to start UDP receiver" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Failed to start UDP receiver" << std::endl;
         receiver_.reset();
         decoder_.reset();
         virtual_device_->close();
@@ -127,12 +126,12 @@ bool AudioReceiver::start(const Config& config) {
     }
 
     running_ = true;
-    std::cout << "[AudioReceiver] Started successfully" << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Listening on " << config_.server.bind_address << ":" << config_.server.port
+                       << std::endl;
     return true;
 }
 
 void AudioReceiver::stop() {
-    std::cout << "[AudioReceiver] stop() called" << std::endl;
     std::unique_ptr<UDPReceiver> receiver;
     {
         std::lock_guard<std::mutex> lock(audio_mutex_);
@@ -141,7 +140,6 @@ void AudioReceiver::stop() {
         }
         if (!running_ && !receiver_ && !virtual_device_ && !decoder_ && !connection_monitor_ &&
             !resampler_.isInitialized()) {
-            std::cout << "[AudioReceiver] Already stopped" << std::endl;
             return;
         }
 
@@ -150,15 +148,11 @@ void AudioReceiver::stop() {
         receiver = std::move(receiver_);
     }
 
-    if (receiver) {
-        std::cout << "[AudioReceiver] Stopping UDP receiver..." << std::endl;
-        receiver->stop();
-    }
+    if (receiver) receiver->stop();
 
     std::lock_guard<std::mutex> lock(audio_mutex_);
 
     if (virtual_device_) {
-        std::cout << "[AudioReceiver] Closing virtual device..." << std::endl;
         virtual_device_->close();
         virtual_device_.reset();
     }
@@ -173,7 +167,6 @@ void AudioReceiver::stop() {
     }
 
     if (connection_monitor_) {
-        std::cout << "[AudioReceiver] Stopping connection monitor..." << std::endl;
         connection_monitor_->stop();
         connection_monitor_.reset();
     }
@@ -181,9 +174,9 @@ void AudioReceiver::stop() {
 #ifdef _WIN32
 
     if (!config_.audio.original_mic_id.empty()) {
-        std::cout << "[AudioReceiver] Restoring original default microphone..." << std::endl;
+        moonmic::logInfo() << "[AudioReceiver] Restoring original default microphone..." << std::endl;
         if (moonmic::platform::windows::SetDefaultRecordingDevice(config_.audio.original_mic_id)) {
-            std::cout << "[AudioReceiver] Original microphone restored successfully" << std::endl;
+            moonmic::logInfo() << "[AudioReceiver] Original microphone restored successfully" << std::endl;
         }
         config_.audio.original_mic_id = "";
         config_.save(Config::getDefaultConfigPath());
@@ -196,7 +189,6 @@ void AudioReceiver::stop() {
     stats_.is_receiving = false;
     stats_.is_paused = false;
     stopping_ = false;
-    std::cout << "[AudioReceiver] Stopped" << std::endl;
 }
 
 void AudioReceiver::pause() {
@@ -212,7 +204,7 @@ void AudioReceiver::pauseInternal() {
 
     sendControlSignalInternal(MOONMIC_CTRL_STOP);
 
-    std::cout << "[AudioReceiver] Paused - sent STOP to client" << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Paused - sent STOP to client" << std::endl;
 }
 
 void AudioReceiver::resume() {
@@ -230,7 +222,7 @@ void AudioReceiver::resumeInternal() {
 
     sendControlSignalInternal(MOONMIC_CTRL_START);
 
-    std::cout << "[AudioReceiver] Resumed - sent START to client" << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Resumed - sent START to client" << std::endl;
 }
 
 void AudioReceiver::sendControlSignal(uint32_t signal_magic) {
@@ -240,16 +232,16 @@ void AudioReceiver::sendControlSignal(uint32_t signal_magic) {
 
 void AudioReceiver::sendControlSignalInternal(uint32_t signal_magic) {
     if (!connection_monitor_ || last_validated_ip_.empty()) {
-        std::cerr << "[AudioReceiver] Cannot send control signal: no validated client" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Cannot send control signal: no validated client" << std::endl;
         return;
     }
 
     if (!connection_monitor_->isRunning()) {
-        std::cerr << "[AudioReceiver] Cannot send control signal: connection monitor not running" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Cannot send control signal: connection monitor not running" << std::endl;
         return;
     }
 
-    uint8_t packet[sizeof(moonmic_control_packet_t)];
+    uint8_t packet[MOONMIC_CONTROL_SIZE];
     moonmic_write_control_le(packet, signal_magic);
 
     connection_monitor_->sendPacket(packet, sizeof(packet));
@@ -258,14 +250,14 @@ void AudioReceiver::sendControlSignalInternal(uint32_t signal_magic) {
                               : (signal_magic == MOONMIC_CTRL_START) ? "START"
                                                                      : "UNKNOWN";
 
-    std::cout << "[AudioReceiver] Sent control signal: " << signal_name << " to " << last_validated_ip_ << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Sent control signal: " << signal_name << " to " << last_validated_ip_ << std::endl;
 }
 
 bool AudioReceiver::switchAudioOutput(bool use_speakers) {
     std::lock_guard<std::mutex> lock(audio_mutex_);
     if (!running_) return false;
 
-    std::cout << "[AudioReceiver] Hot-swapping audio to " << (use_speakers ? "speakers" : "VB-Cable") << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Hot-swapping audio to " << (use_speakers ? "speakers" : "VB-Cable") << std::endl;
 
     bool was_paused = paused_;
     if (!was_paused) pauseInternal();
@@ -285,9 +277,9 @@ bool AudioReceiver::switchAudioOutput(bool use_speakers) {
     if (use_speakers) {
 
         if (!config_.audio.original_mic_id.empty()) {
-            std::cout << "[AudioReceiver] Speaker Mode: Restoring original default microphone..." << std::endl;
+            moonmic::logInfo() << "[AudioReceiver] Speaker Mode: Restoring original default microphone..." << std::endl;
             if (moonmic::platform::windows::SetDefaultRecordingDevice(config_.audio.original_mic_id)) {
-                std::cout << "[AudioReceiver] Original microphone restored." << std::endl;
+                moonmic::logInfo() << "[AudioReceiver] Original microphone restored." << std::endl;
             }
             config_.audio.original_mic_id = "";
             config_.save(Config::getDefaultConfigPath());
@@ -300,13 +292,13 @@ bool AudioReceiver::switchAudioOutput(bool use_speakers) {
                 moonmic::platform::windows::FindRecordingDeviceID(config_.audio.recording_endpoint_name);
 
             if (currentId != virtualId) {
-                std::cout << "[AudioReceiver] Virtual Mic Mode: Saving original default mic: " << currentName
+                moonmic::logInfo() << "[AudioReceiver] Virtual Mic Mode: Saving original default mic: " << currentName
                           << std::endl;
                 config_.audio.original_mic_id = currentId;
                 config_.save(Config::getDefaultConfigPath());
 
                 if (moonmic::platform::windows::SetDefaultRecordingDevice(config_.audio.recording_endpoint_name)) {
-                    std::cout << "[AudioReceiver] Set default mic to: " << config_.audio.recording_endpoint_name
+                    moonmic::logInfo() << "[AudioReceiver] Set default mic to: " << config_.audio.recording_endpoint_name
                               << std::endl;
                 }
             }
@@ -320,13 +312,13 @@ bool AudioReceiver::switchAudioOutput(bool use_speakers) {
     virtual_device_ = VirtualDevice::create();
 
     if (!virtual_device_->init(output_device, 0, config_.audio.channels)) {
-        std::cerr << "[AudioReceiver] Failed to initialize new audio device" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Failed to initialize new audio device" << std::endl;
         if (!was_paused) resumeInternal();
         return false;
     }
 
     system_sample_rate_ = virtual_device_->getSampleRate();
-    std::cout << "[AudioReceiver] Audio output: " << output_mode << " @ " << system_sample_rate_ << "Hz" << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Audio output: " << output_mode << " @ " << system_sample_rate_ << "Hz" << std::endl;
 
     if (!was_paused) resumeInternal();
 
@@ -356,7 +348,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
     }
 
     uint32_t packet_magic = size >= sizeof(uint32_t) ? moonmic_read_u32_le(data) : 0;
-    if (packet_magic == MOONMIC_FOCUS_REQUEST_MAGIC && size == sizeof(moonmic_focus_request_t)) {
+    if (packet_magic == MOONMIC_FOCUS_REQUEST_MAGIC && size == MOONMIC_FOCUS_REQUEST_SIZE) {
         if (!receiver_ || !isClientAllowed(sender_ip)) {
             return;
         }
@@ -380,7 +372,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         response.normalized_x = focus.normalized_x;
         response.normalized_y = focus.normalized_y;
         response.request_id = request.request_id;
-        uint8_t response_wire[sizeof(moonmic_focus_response_t)];
+        uint8_t response_wire[MOONMIC_FOCUS_RESPONSE_SIZE];
         moonmic_write_focus_response_le(response_wire, &response);
         receiver_->sendTo(response_wire, sizeof(response_wire), sender_ip, sender_port);
         return;
@@ -392,7 +384,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
     last_packet_time_ = std::chrono::steady_clock::now();
 
     const bool is_handshake_magic =
-        (size >= sizeof(moonmic_handshake_t)) && moonmic_read_u32_le(data) == MOONMIC_HANDSHAKE_MAGIC;
+        (size >= MOONMIC_HANDSHAKE_SIZE) && moonmic_read_u32_le(data) == MOONMIC_HANDSHAKE_MAGIC;
 
     if (is_handshake_magic) {
 
@@ -414,7 +406,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         }
         // Replies must target the client's source port.
         connection_monitor_->start(sender_ip, sender_port);
-        std::cout << "[AudioReceiver] Started heartbeat monitor for " << sender_ip << ":" << sender_port << std::endl;
+        moonmic::logInfo() << "[AudioReceiver] Started heartbeat monitor for " << sender_ip << ":" << sender_port << std::endl;
 
         std::vector<uint8_t> ack_buffer(data, data + size);
 
@@ -426,21 +418,21 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
             ack.display_height = current_h;
         }
 
-        uint8_t ack_wire[sizeof(moonmic_handshake_t)];
+        uint8_t ack_wire[MOONMIC_HANDSHAKE_SIZE];
         moonmic_write_handshake_le(ack_wire, &ack);
 
         connection_monitor_->sendPacket(ack_wire, sizeof(ack_wire));
-        std::cout << "[AudioReceiver] Sent Handshake ACK (" << size << " bytes) to " << sender_ip << std::endl;
+        moonmic::logInfo() << "[AudioReceiver] Sent Handshake ACK (" << size << " bytes) to " << sender_ip << std::endl;
 
         return;
     }
 
-    if (size == sizeof(moonmic_ping_packet_t)) {
+    if (size == MOONMIC_PING_SIZE) {
         uint32_t magic = moonmic_read_u32_le(data);
 
         if (magic == MOONMIC_PING_MAGIC) {
             if (receiver_) {
-                uint8_t pong[sizeof(moonmic_ping_packet_t)];
+                uint8_t pong[MOONMIC_PING_SIZE];
                 moonmic_write_ping_le(pong, MOONMIC_PONG_MAGIC, moonmic_read_ping_timestamp_le(data));
                 receiver_->sendTo(pong, sizeof(pong), sender_ip, sender_port);
             }
@@ -467,7 +459,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
     }
 
     if (size < MOONMIC_HEADER_SIZE) {
-        std::cerr << "[AudioReceiver] Packet too small: " << size << " bytes (expected at least " << MOONMIC_HEADER_SIZE
+        moonmic::logError() << "[AudioReceiver] Packet too small: " << size << " bytes (expected at least " << MOONMIC_HEADER_SIZE
                   << " for header)" << std::endl;
         stats_.packets_dropped++;
         return;
@@ -475,10 +467,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
     uint32_t magic = moonmic_read_u32_le(data);
 
-    // Validate magic - must be MMIC for audio packets
-
     if (magic != MOONMIC_MAGIC) {
-
         return;
     }
 
@@ -492,15 +481,13 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
     if (is_lagging) {
         lag_drop_count_++;
         if (lag_drop_count_ % 50 == 0) {
-            std::cout << "[AudioReceiver] Lag detected: dropping packet to drain the receive buffer" << std::endl;
+            moonmic::logInfo() << "[AudioReceiver] Lag detected: dropping packet to drain the receive buffer" << std::endl;
         }
         stats_.packets_dropped++;
         stats_.packets_dropped_lag++;
         return;
     }
 
-    uint32_t sequence = moonmic_read_u32_le(data + 4);
-    uint64_t timestamp = moonmic_read_u64_le(data + 8);
     uint32_t sample_rate_field = moonmic_read_u32_le(data + 16);
 
     bool is_raw_mode = (sample_rate_field & MOONMIC_RAW_FLAG) != 0;
@@ -508,24 +495,8 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
     if (stream_rate < 8000 || stream_rate > 192000) {
         stats_.packets_dropped++;
-        std::cerr << "[AudioReceiver] Unsupported stream sample rate: " << stream_rate << " Hz" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Unsupported stream sample rate: " << stream_rate << " Hz" << std::endl;
         return;
-    }
-
-    if (stats_.packets_received == 1) {
-        std::cout << "[AudioReceiver] FIRST PACKET DEBUG (manual read):" << std::endl;
-        std::cout << "  Packet size: " << size << " bytes" << std::endl;
-        std::cout << "  magic = 0x" << std::hex << magic << " (expected 0x" << MOONMIC_MAGIC << ")" << std::dec
-                  << std::endl;
-        std::cout << "  sequence = " << sequence << std::endl;
-        std::cout << "  timestamp = " << timestamp << std::endl;
-        std::cout << "  sample_rate = " << stream_rate << std::endl;
-        std::cout << "  raw_mode = " << (is_raw_mode ? "YES" : "NO") << std::endl;
-        std::cout << "  Raw header bytes:";
-        for (int i = 0; i < 20; i++) {
-            std::cout << " " << std::hex << std::setw(2) << std::setfill('0') << (int)data[i];
-        }
-        std::cout << std::dec << std::endl << std::endl;
     }
 
     if (!resampler_.isInitialized() || detected_stream_rate_ != stream_rate) {
@@ -534,29 +505,22 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         const int error = resampler_.configure(config_.audio.channels, stream_rate, system_sample_rate_);
         if (error != RESAMPLER_ERR_SUCCESS) {
             stats_.packets_dropped++;
-            std::cerr << "[AudioReceiver] Failed to configure resampler: " << error << std::endl;
+            moonmic::logError() << "[AudioReceiver] Failed to configure resampler: " << error << std::endl;
             return;
         }
 
         detected_stream_rate_ = stream_rate;
         resampler_packet_count_ = 0;
 
-        std::cout << "[AudioReceiver] " << (first_packet ? "Stream detected" : "Stream sample rate changed")
-                  << std::endl;
-        std::cout << "[AudioReceiver] Source IP: " << sender_ip << std::endl;
-        if (!first_packet) {
-            std::cout << "[AudioReceiver] Previous sample rate: " << previous_rate << " Hz" << std::endl;
+        auto stream_log = moonmic::logInfo();
+        stream_log << "[AudioReceiver] " << sender_ip;
+        if (first_packet) {
+            stream_log << " connected with ";
+        } else {
+            stream_log << " changed from " << previous_rate << " Hz to ";
         }
-        std::cout << "[AudioReceiver] Stream sample rate: " << stream_rate << " Hz" << std::endl;
-        std::cout << "[AudioReceiver] Output sample rate: " << system_sample_rate_ << " Hz" << std::endl;
-        std::cout << "[AudioReceiver] Mode: " << (is_raw_mode ? "RAW PCM" : "Opus") << std::endl;
-
-        std::cout << "[AudioReceiver] Resampler active: " << stream_rate << "Hz -> " << system_sample_rate_
-                  << "Hz (quality 10)" << std::endl;
-        if (stream_rate == system_sample_rate_) {
-            std::cout << "[AudioReceiver] (Resampler enabled for Drift Correction)" << std::endl;
-        }
-        std::cout << std::endl;
+        stream_log << stream_rate << " Hz " << (is_raw_mode ? "PCM" : "Opus") << ", output " << system_sample_rate_
+                   << " Hz" << std::endl;
     }
 
     const uint8_t* payload = data + MOONMIC_HEADER_SIZE;
@@ -570,7 +534,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         const size_t num_samples = payload_size / sizeof(int16_t);
         if (payload_size % sizeof(int16_t) != 0 || num_samples > MAX_FRAMES * 2 || num_samples % channels != 0) {
             stats_.packets_dropped++;
-            std::cerr << "[AudioReceiver] Invalid raw audio payload: " << payload_size << " bytes" << std::endl;
+            moonmic::logError() << "[AudioReceiver] Invalid raw audio payload: " << payload_size << " bytes" << std::endl;
             return;
         }
         output_frames = static_cast<int>(num_samples / channels);
@@ -618,7 +582,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
                         moonmic::platform::windows::FindRecordingDeviceID(config_.audio.recording_endpoint_name);
 
                     if (!virtualId.empty() && currentId != virtualId) {
-                        std::cout << "[AudioReceiver] Saving original default mic: " << currentName << " (" << currentId
+                        moonmic::logInfo() << "[AudioReceiver] Saving original default mic: " << currentName << " (" << currentId
                                   << ")" << std::endl;
                         config_.audio.original_mic_id = currentId;
 
@@ -626,7 +590,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
                         if (moonmic::platform::windows::SetDefaultRecordingDevice(
                                 config_.audio.recording_endpoint_name)) {
-                            std::cout << "[AudioReceiver] Auto-set default mic to: "
+                            moonmic::logInfo() << "[AudioReceiver] Auto-set default mic to: "
                                       << config_.audio.recording_endpoint_name << std::endl;
                         }
                     }
@@ -640,7 +604,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
             if (err != RESAMPLER_ERR_SUCCESS) {
                 stats_.packets_dropped++;
-                std::cerr << "[AudioReceiver] RAW resampling failed: " << err << std::endl;
+                moonmic::logError() << "[AudioReceiver] RAW resampling failed: " << err << std::endl;
                 return;
             }
 
@@ -651,7 +615,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         raw_packet_count_++;
         if (raw_packet_count_ % 100 == 1 && raw_packet_count_ > 1) {
             if (isDebugMode()) {
-                std::cout << "[AudioReceiver] Processing RAW: packet #" << stats_.packets_received << ", "
+                moonmic::logInfo() << "[AudioReceiver] Processing RAW: packet #" << stats_.packets_received << ", "
                           << output_frames << " frames" << std::endl;
             }
         }
@@ -661,7 +625,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
             decoder_->decode(payload, static_cast<int>(payload_size), decode_buffer_, static_cast<int>(MAX_FRAMES));
         if (decoded_frames < 0) {
             stats_.packets_dropped++;
-            std::cerr << "[AudioReceiver] Decode failed for packet from " << sender_ip << std::endl;
+            moonmic::logError() << "[AudioReceiver] Decode failed for packet from " << sender_ip << std::endl;
             return;
         }
 
@@ -675,7 +639,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
             if (err != RESAMPLER_ERR_SUCCESS) {
                 stats_.packets_dropped++;
-                std::cerr << "[AudioReceiver] Resampling failed: " << err << std::endl;
+                moonmic::logError() << "[AudioReceiver] Resampling failed: " << err << std::endl;
                 return;
             }
 
@@ -687,12 +651,12 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         if (opus_packet_count_ % 100 == 1 && opus_packet_count_ > 1) {
             if (static_cast<uint32_t>(config_.audio.resampling_rate) == detected_stream_rate_) {
                 if (isDebugMode()) {
-                    std::cout << "[AudioReceiver] Processing Opus: packet #" << stats_.packets_received << ", decoded "
+                    moonmic::logInfo() << "[AudioReceiver] Processing Opus: packet #" << stats_.packets_received << ", decoded "
                               << output_frames << " frames" << std::endl;
                 }
             } else {
                 if (isDebugMode()) {
-                    std::cout << "[AudioReceiver] Processing Opus: packet #" << stats_.packets_received
+                    moonmic::logInfo() << "[AudioReceiver] Processing Opus: packet #" << stats_.packets_received
                               << ", decoded=" << decoded_frames << " frames @ " << detected_stream_rate_ << "Hz"
                               << ", resampled=" << output_frames << " frames @ " << config_.audio.resampling_rate
                               << "Hz (Speex)" << std::endl;
@@ -703,7 +667,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
     if (!config_.audio.use_speaker_mode && config_.audio.recording_endpoint_name.find("Steam") != std::string::npos) {
         if (!steam_attenuation_logged_) {
-            std::cout
+            moonmic::logInfo()
                 << "[AudioReceiver] Steam WDM-KS detected: applying 15% pre-attenuation to compensate for driver AGC"
                 << std::endl;
             steam_attenuation_logged_ = true;
@@ -718,7 +682,7 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
     if (!virtual_device_->write(output_buffer, output_frames, config_.audio.channels)) {
         stats_.packets_dropped++;
-        std::cerr << "[AudioReceiver] Failed to write audio output" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Failed to write audio output" << std::endl;
     }
 
     stats_.is_receiving = true;
@@ -726,44 +690,35 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
 
 bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const std::string& sender_ip, uint16_t& out_w,
                                       uint16_t& out_h) {
-    if (size < sizeof(moonmic_handshake_t)) {
-        std::cerr << "[AudioReceiver] Packet too small for handshake: " << size << " bytes" << std::endl;
+    if (size < MOONMIC_HANDSHAKE_SIZE) {
+        moonmic::logError() << "[AudioReceiver] Packet too small for handshake: " << size << " bytes" << std::endl;
         return false;
     }
 
     moonmic_handshake_t hs = {};
-    moonmic_read_handshake_le(data, &hs);
-
-    if (hs.magic != MOONMIC_HANDSHAKE_MAGIC) {
-        std::cerr << "[AudioReceiver] Invalid handshake magic: 0x" << std::hex << hs.magic << std::dec << std::endl;
+    if (!moonmic_decode_handshake_le(data, size, &hs)) {
+        moonmic::logError() << "[AudioReceiver] Malformed handshake" << std::endl;
         return false;
     }
 
-    if (hs.uniqueid_len > 0 && hs.uniqueid_len <= 16) {
-        client_uniqueid_ = std::string(hs.uniqueid, hs.uniqueid_len);
-    }
-
-    if (hs.devicename_len > 0 && hs.devicename_len <= 64) {
-        client_devicename_ = std::string(hs.devicename, hs.devicename_len);
-        stats_.client_name = client_devicename_;
-    }
+    client_devicename_.assign(hs.devicename, hs.devicename_len);
+    stats_.client_name = client_devicename_;
 
     if (config_.security.enable_whitelist && !isClientAllowed(sender_ip)) {
-        std::cerr << "[AudioReceiver] DENY: " << sender_ip
-                  << " is not in the client whitelist" << std::endl;
+        moonmic::logError() << "[AudioReceiver] DENY: " << sender_ip << " is not in the client whitelist" << std::endl;
         return false;
     }
 
     if (!config_.security.enable_whitelist) {
-        std::cout << "[AudioReceiver] Client connected: " << client_devicename_ << " [whitelist disabled]" << std::endl;
+        moonmic::logInfo() << "[AudioReceiver] Client connected: " << client_devicename_ << " [whitelist disabled]" << std::endl;
 
         last_packet_time_ = std::chrono::steady_clock::now();
         stats_.is_connected = true;
         return true;
     }
 
-    // Sunshine assigns its own client UUID, so it cannot be matched against the
-
+    // Sunshine's UUID differs from the Moonlight client UUID, so pair_status is
+    // the authentication signal for this handshake.
     if (hs.pair_status != 1) {
         auto now = std::chrono::steady_clock::now();
         auto grace_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_validated_time_).count();
@@ -771,20 +726,20 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
                      (grace_ms < 8000);
 
         if (grace) {
-            std::cout << "[AudioReceiver] Grace-accept pair_status=0 during Sunshine restart (" << grace_ms
+            moonmic::logInfo() << "[AudioReceiver] Grace-accept pair_status=0 during Sunshine restart (" << grace_ms
                       << "ms since last validation)" << std::endl;
         } else {
-            std::cerr << "[AudioReceiver] DENY: Client '" << client_devicename_
+            moonmic::logError() << "[AudioReceiver] DENY: Client '" << client_devicename_
                       << "' not validated by Sunshine (pair_status=" << (int)hs.pair_status << ")" << std::endl;
-            std::cerr << "[AudioReceiver] Ensure client is paired with Sunshine host" << std::endl;
+            moonmic::logError() << "[AudioReceiver] Ensure client is paired with Sunshine host" << std::endl;
             return false;
         }
     }
 
-    std::cout << "[AudioReceiver] Client validated (pair_status=1): " << client_devicename_ << std::endl;
+    moonmic::logInfo() << "[AudioReceiver] Client validated (pair_status=1): " << client_devicename_ << std::endl;
 
     if (hs.version >= MOONMIC_PROTOCOL_VERSION && hs.display_width > 0 && hs.display_height > 0) {
-        std::cout << "[AudioReceiver] Client requests display resolution: " << hs.display_width << "x"
+        moonmic::logInfo() << "[AudioReceiver] Client requests display resolution: " << hs.display_width << "x"
                   << hs.display_height << std::endl;
 
         out_w = 0;
@@ -798,7 +753,7 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
 
         if (out_w > 0 && out_h > 0 && !force_update) {
             if (out_w != hs.display_width || out_h != hs.display_height) {
-                std::cout << "[AudioReceiver] Resolution mismatch (Current: " << out_w << "x" << out_h
+                moonmic::logInfo() << "[AudioReceiver] Resolution mismatch (Current: " << out_w << "x" << out_h
                           << ", Target: " << hs.display_width << "x" << hs.display_height
                           << "). Waiting for FORCE flag." << std::endl;
                 should_update = false;
@@ -814,12 +769,12 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
 
         if (is_valid && should_update) {
             if (!applyDisplayResolution(hs.display_width, hs.display_height)) {
-                std::cerr << "[AudioReceiver] Warning: host resolution request could not be applied automatically"
+                moonmic::logError() << "[AudioReceiver] Warning: host resolution request could not be applied automatically"
                           << std::endl;
             }
         } else if (!is_valid) {
-            std::cerr << "[AudioReceiver] Invalid resolution request: " << hs.display_width << "x"
-                      << hs.display_height << std::endl;
+            moonmic::logError() << "[AudioReceiver] Invalid resolution request: " << hs.display_width << "x" << hs.display_height
+                      << std::endl;
         }
     }
 
@@ -835,26 +790,26 @@ bool AudioReceiver::applyDisplayResolution(uint16_t width, uint16_t height) {
         bool already_correct = has_current && (current_w == width) && (current_h == height);
 
         if (already_correct) {
-            std::cout << "[AudioReceiver] Resolution already set to " << width << "x" << height
+            moonmic::logInfo() << "[AudioReceiver] Resolution already set to " << width << "x" << height
                       << " - No restart needed" << std::endl;
             return true;
         }
 
         if (sunshine_webui_->setDisplayResolution(width, height)) {
-            std::cout << "[AudioReceiver] Sunshine configured for " << width << "x" << height
+            moonmic::logInfo() << "[AudioReceiver] Sunshine configured for " << width << "x" << height
                       << " -> 960x544 downscale (host mode intact)" << std::endl;
             applied = true;
 
             if (sunshine_webui_->restartSunshine()) {
-                std::cout << "[AudioReceiver] Sunshine restart requested after resolution change" << std::endl;
+                moonmic::logInfo() << "[AudioReceiver] Sunshine restart requested after resolution change" << std::endl;
             } else {
-                std::cerr << "[AudioReceiver] Sunshine restart request failed" << std::endl;
+                moonmic::logError() << "[AudioReceiver] Sunshine restart request failed" << std::endl;
             }
         } else {
-            std::cerr << "[AudioReceiver] Sunshine WebUI failed to apply resolution" << std::endl;
+            moonmic::logError() << "[AudioReceiver] Sunshine WebUI failed to apply resolution" << std::endl;
         }
     } else {
-        std::cerr << "[AudioReceiver] Sunshine WebUI not available - skipping API resolution change" << std::endl;
+        moonmic::logError() << "[AudioReceiver] Sunshine WebUI not available - skipping API resolution change" << std::endl;
     }
 
     // Do not force host display changes; rely solely on Sunshine remapping.
@@ -878,7 +833,7 @@ AudioReceiver::Stats AudioReceiver::getStats() {
                 stats_.is_connected = false;
 
                 if (client_validated_) {
-                    std::cout << "[AudioReceiver] Client disconnected (timeout): " << client_devicename_ << std::endl;
+                    moonmic::logInfo() << "[AudioReceiver] Client disconnected (timeout): " << client_devicename_ << std::endl;
                     resetConnectionState();
                 }
             }
