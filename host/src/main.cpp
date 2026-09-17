@@ -13,9 +13,11 @@
 #include <chrono>
 #include <filesystem>
 #include <future>
+#include <cerrno>
 
 #ifdef __linux__
 #include <limits.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -57,6 +59,37 @@ static bool g_update_check_done = false;
 static bool g_update_dismissed = false;
 static std::string g_latest_version;
 static std::string g_download_url;
+
+static bool openExternalUrl(const std::string& url) {
+#ifdef _WIN32
+    const auto result = reinterpret_cast<INT_PTR>(ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL));
+    return result > 32;
+#elif defined(__linux__)
+    const pid_t launcher = fork();
+    if (launcher < 0) return false;
+
+    if (launcher == 0) {
+        const pid_t opener = fork();
+        if (opener < 0) _exit(127);
+        if (opener == 0) {
+            execlp("xdg-open", "xdg-open", url.c_str(), static_cast<char*>(nullptr));
+            _exit(127);
+        }
+        _exit(0);
+    }
+
+    int status = 0;
+    pid_t result = -1;
+    do {
+        result = waitpid(launcher, &status, 0);
+    } while (result < 0 && errno == EINTR);
+
+    return result == launcher && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#else
+    (void)url;
+    return false;
+#endif
+}
 
 static void setWindowIcon(GLFWwindow* window) {
     unsigned char* pixels = nullptr;
@@ -191,21 +224,13 @@ static void renderAboutPopup() {
     ImGui::Text("Author:");
     ImGui::SameLine();
     if (ImGui::SmallButton("AorsiniYT")) {
-#ifdef _WIN32
-        ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT", NULL, NULL, SW_SHOWNORMAL);
-#else
-        system("xdg-open https://github.com/AorsiniYT &");
-#endif
+        openExternalUrl("https://github.com/AorsiniYT");
     }
 
     ImGui::Text("GitHub:");
     ImGui::SameLine();
     if (ImGui::SmallButton("moonmic")) {
-#ifdef _WIN32
-        ShellExecuteA(NULL, "open", "https://github.com/AorsiniYT/moonmic", NULL, NULL, SW_SHOWNORMAL);
-#else
-        system("xdg-open https://github.com/AorsiniYT/moonmic &");
-#endif
+        openExternalUrl("https://github.com/AorsiniYT/moonmic");
     }
 
     ImGui::Spacing();
@@ -214,11 +239,7 @@ static void renderAboutPopup() {
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.3f, 0.3f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
     if (ImGui::Button("Donate on Ko-fi", ImVec2(200, 30))) {
-#ifdef _WIN32
-        ShellExecuteA(NULL, "open", "https://ko-fi.com/aorsini", NULL, NULL, SW_SHOWNORMAL);
-#else
-        system("xdg-open https://ko-fi.com/aorsini &");
-#endif
+        openExternalUrl("https://ko-fi.com/aorsini");
     }
     ImGui::PopStyleColor(2);
 
@@ -245,12 +266,7 @@ static void renderUpdatePopup() {
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.7f, 0.2f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.9f, 0.3f, 1.0f));
     if (ImGui::Button("Download", ImVec2(120, 30))) {
-#ifdef _WIN32
-        ShellExecuteA(NULL, "open", g_download_url.c_str(), NULL, NULL, SW_SHOWNORMAL);
-#else
-        std::string cmd = "xdg-open " + g_download_url + " &";
-        system(cmd.c_str());
-#endif
+        openExternalUrl(g_download_url);
         g_update_dismissed = true;
         ImGui::CloseCurrentPopup();
     }

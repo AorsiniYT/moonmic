@@ -471,9 +471,8 @@ void AudioReceiver::onPacketReceived(const uint8_t* data, size_t size, const std
         return;
     }
 
-    // Audio is only accepted from the peer that completed the handshake; with
-    // the whitelist on, a stray datagram with a valid magic must not inject.
-    if (config_.security.enable_whitelist && (!client_validated_ || sender_ip != last_validated_ip_)) {
+    // Audio is only accepted from the peer that completed the handshake.
+    if (!client_validated_ || sender_ip != last_validated_ip_) {
         stats_.packets_dropped++;
         return;
     }
@@ -718,7 +717,7 @@ bool AudioReceiver::validateHandshake(const uint8_t* data, size_t size, const st
     }
 
     // Sunshine's UUID differs from the Moonlight client UUID, so pair_status is
-    // the authentication signal for this handshake.
+    // an additional pairing-state signal when the IP whitelist is enabled.
     if (hs.pair_status != 1) {
         auto now = std::chrono::steady_clock::now();
         auto grace_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_validated_time_).count();

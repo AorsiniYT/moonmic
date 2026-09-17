@@ -50,13 +50,11 @@ void ConnectionMonitor::start(const std::string& client_ip, uint16_t port) {
 }
 
 void ConnectionMonitor::stop() {
-    if (!running_) {
-        return;
-    }
+    const bool was_running = running_.exchange(false);
+    wait_cv_.notify_all();
 
-    running_ = false;
-
-    if (ping_thread_.joinable()) {
+    const bool had_thread = ping_thread_.joinable();
+    if (had_thread) {
         ping_thread_.join();
     }
 
@@ -65,7 +63,9 @@ void ConnectionMonitor::stop() {
         socket_fd_ = static_cast<intptr_t>(INVALID_SOCKET);
     }
 
-    moonmic::logInfo() << "[ConnectionMonitor] Stopped" << std::endl;
+    if (was_running || had_thread) {
+        moonmic::logInfo() << "[ConnectionMonitor] Stopped" << std::endl;
+    }
 }
 
 void ConnectionMonitor::sendPacket(const void* data, size_t size) {
@@ -109,7 +109,8 @@ void ConnectionMonitor::pingThreadFunc() {
             moonmic::logError() << "[ConnectionMonitor] Failed to send ping" << std::endl;
         }
 
-        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::unique_lock<std::mutex> lock(wait_mutex_);
+        wait_cv_.wait_for(lock, std::chrono::seconds(2), [this] { return !running_.load(); });
     }
 }
 

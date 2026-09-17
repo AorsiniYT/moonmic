@@ -2,6 +2,7 @@
 
 #include "../virtual_device.h"
 #include "driver_installer.h"
+#include "audio_utils.h"
 #define INITGUID
 #include <windows.h>
 #include <vector>
@@ -378,8 +379,7 @@ class VirtualDeviceWindows : public VirtualDevice {
                     props->GetValue(PKEY_Device_FriendlyName, &var_name);
 
                     if (var_name.vt == VT_LPWSTR) {
-                        std::wstring wname(var_name.pwszVal);
-                        std::string name(wname.begin(), wname.end());
+                        const std::string name = platform::windows::WideToUtf8(var_name.pwszVal);
 
                         moonmic::logInfo() << "[VirtualDevice]   Device " << i << ": '" << name << "'" << std::endl;
 

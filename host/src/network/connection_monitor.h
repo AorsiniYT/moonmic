@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 #include <atomic>
+#include <condition_variable>
+#include <mutex>
 #include <thread>
 #include "moonmic_protocol.h"
 
@@ -28,6 +30,8 @@ class ConnectionMonitor {
     std::string client_ip_;
     uint16_t client_port_;
     std::thread ping_thread_;
+    std::mutex wait_mutex_;
+    std::condition_variable wait_cv_;
     intptr_t socket_fd_;
 };
 

@@ -8,6 +8,8 @@ namespace moonmic {
 namespace platform {
 namespace windows {
 
+std::string WideToUtf8(const wchar_t* value);
+
 bool GetDefaultRecordingDevice(std::string& deviceId, std::string& friendlyName);
 
 bool SetDefaultRecordingDevice(const std::string& nameOrId);

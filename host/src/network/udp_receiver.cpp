@@ -131,10 +131,6 @@ void UDPReceiver::receiveLoop() {
             break;
         }
 
-        if (received < 20) {
-            continue;
-        }
-
         char sender_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &sender_addr.sin_addr, sender_ip, INET_ADDRSTRLEN);
         uint16_t sender_port = ntohs(sender_addr.sin_port);
@@ -157,6 +153,20 @@ void UDPReceiver::receiveLoop() {
         }
     }
     running_ = false;
+}
+
+uint16_t UDPReceiver::boundPort() const {
+    const socket_t socket = socket_fd_.load();
+    if (socket == INVALID_SOCKET) return 0;
+
+    struct sockaddr_in addr = {};
+#ifdef _WIN32
+    int addr_len = sizeof(addr);
+#else
+    socklen_t addr_len = sizeof(addr);
+#endif
+    if (getsockname(socket, reinterpret_cast<sockaddr*>(&addr), &addr_len) == SOCKET_ERROR) return 0;
+    return ntohs(addr.sin_port);
 }
 
 bool UDPReceiver::sendTo(const void* data, size_t size, const std::string& ip, uint16_t port) {

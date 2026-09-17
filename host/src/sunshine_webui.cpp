@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <exception>
+#include <utility>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -23,29 +24,6 @@ namespace moonmic {
 #ifdef _WIN32
 
 static const char kStoredPasswordPrefix[] = "v2:";
-
-static std::string base64_decode(const std::string& input) {
-    std::string output;
-    int val = 0;
-    int valb = -8;
-    for (unsigned char c : input) {
-        if (c == '=') break;
-        int score;
-        if (c >= 'A' && c <= 'Z') score = c - 'A';
-        else if (c >= 'a' && c <= 'z') score = c - 'a' + 26;
-        else if (c >= '0' && c <= '9') score = c - '0' + 52;
-        else if (c == '+') score = 62;
-        else if (c == '/') score = 63;
-        else continue;
-        val = (val << 6) + score;
-        valb += 6;
-        if (valb >= 0) {
-            output.push_back((char)((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-    return output;
-}
 
 static std::string protectPassword(const std::string& plain) {
     DATA_BLOB in{};
@@ -65,11 +43,15 @@ static std::string unprotectPassword(const std::string& stored) {
     if (stored.compare(0, sizeof(kStoredPasswordPrefix) - 1, kStoredPasswordPrefix) != 0) {
         return "";
     }
-    std::string blob = base64_decode(stored.substr(sizeof(kStoredPasswordPrefix) - 1));
+    auto blob = sunshineBase64Decode(stored.substr(sizeof(kStoredPasswordPrefix) - 1));
+    if (!blob) {
+        return "";
+    }
+
     DATA_BLOB in{};
     DATA_BLOB out{};
-    in.pbData = reinterpret_cast<BYTE*>(blob.data());
-    in.cbData = static_cast<DWORD>(blob.size());
+    in.pbData = reinterpret_cast<BYTE*>(blob->data());
+    in.cbData = static_cast<DWORD>(blob->size());
     if (!CryptUnprotectData(&in, NULL, NULL, NULL, NULL, 0, &out)) {
         return "";
     }
@@ -114,11 +96,14 @@ std::string SunshineWebUI::generateAuthHeader() const {
     return sunshineBasicAuth(config_.sunshine.webui_username, password);
 }
 
-std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint, const std::string& method,
-                                                    const std::string& body) {
+SunshineRequestResult SunshineWebUI::makeAuthenticatedRequestResult(const std::string& endpoint,
+                                                                     const std::string& method,
+                                                                     const std::string& body) {
+    SunshineRequestResult result;
+
     if (!isLoggedIn()) {
         moonmic::logError() << "[SunshineWebUI] Not logged in" << std::endl;
-        return "";
+        return result;
     }
 
     std::string url = "https://" + config_.sunshine.host + ":" + std::to_string(config_.sunshine.webui_port) + endpoint;
@@ -126,7 +111,7 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     std::string auth_header = generateAuthHeader();
     if (auth_header.empty()) {
         moonmic::logError() << "[SunshineWebUI] Failed to generate auth header" << std::endl;
-        return "";
+        return result;
     }
 
     if (g_debug_mode) {
@@ -136,7 +121,7 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
     CURL* curl = curl_easy_init();
     if (!curl) {
         moonmic::logError() << "[SunshineWebUI] Failed to initialize curl" << std::endl;
-        return "";
+        return result;
     }
 
     std::string response_string;
@@ -173,49 +158,58 @@ std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint,
         });
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response_string);
 
-    CURLcode res = curl_easy_perform(curl);
-
-    if (res != CURLE_OK) {
-        moonmic::logError() << "[SunshineWebUI] curl_easy_perform() failed: " << curl_easy_strerror(res) << std::endl;
-        curl_slist_free_all(headers);
-        curl_easy_cleanup(curl);
-        return "";
+    const CURLcode curl_result = curl_easy_perform(curl);
+    long http_code = 0;
+    if (curl_result == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
     }
 
-    long http_code = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+    result.status = classifySunshineResponse(curl_result == CURLE_OK, curl_result == CURLE_GOT_NOTHING, http_code);
+    result.http_code = http_code;
+    result.body = std::move(response_string);
 
-    if (g_debug_mode) {
-        moonmic::logInfo() << "[SunshineWebUI] HTTP " << http_code << " - " << response_string.size() << " bytes received"
+    if (g_debug_mode && curl_result == CURLE_OK) {
+        moonmic::logInfo() << "[SunshineWebUI] HTTP " << http_code << " - " << result.body.size() << " bytes received"
                   << std::endl;
     }
 
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
-    if (http_code == 401) {
-        moonmic::logError() << "[SunshineWebUI] Authentication failed (401 Unauthorized)" << std::endl;
-        return "";
+    if (result.status == SunshineRequestStatus::TransportError) {
+        moonmic::logError() << "[SunshineWebUI] Request failed: " << curl_easy_strerror(curl_result) << std::endl;
+    } else if (result.status == SunshineRequestStatus::HttpError) {
+        if (http_code == 401) {
+            moonmic::logError() << "[SunshineWebUI] Authentication failed (401 Unauthorized)" << std::endl;
+        } else {
+            moonmic::logError() << "[SunshineWebUI] HTTP error: " << http_code << std::endl;
+        }
     }
 
-    if (http_code != 200) {
-        moonmic::logError() << "[SunshineWebUI] HTTP error: " << http_code << std::endl;
+    return result;
+}
+
+std::string SunshineWebUI::makeAuthenticatedRequest(const std::string& endpoint, const std::string& method,
+                                                    const std::string& body) {
+    auto result = makeAuthenticatedRequestResult(endpoint, method, body);
+    if (result.status != SunshineRequestStatus::Success) {
         return "";
     }
-
-    return response_string;
+    return std::move(result.body);
 }
 
 bool SunshineWebUI::restartSunshine() {
-
-    std::string response = makeAuthenticatedRequest("/api/restart", "POST", "{}");
-    if (response.empty()) {
-        moonmic::logError() << "[SunshineWebUI] Restart request returned empty response (Sunshine likely restarted connection)"
-                  << std::endl;
-
-        return true;
+    const auto result = makeAuthenticatedRequestResult("/api/restart", "POST", "{}");
+    if (!sunshineRestartSucceeded(result.status)) {
+        moonmic::logError() << "[SunshineWebUI] Sunshine restart request failed" << std::endl;
+        return false;
     }
-    moonmic::logInfo() << "[SunshineWebUI] Sunshine restart requested" << std::endl;
+
+    if (result.status == SunshineRequestStatus::EmptyReply) {
+        moonmic::logInfo() << "[SunshineWebUI] Sunshine closed the connection during restart" << std::endl;
+    } else {
+        moonmic::logInfo() << "[SunshineWebUI] Sunshine restart requested" << std::endl;
+    }
     return true;
 }
 

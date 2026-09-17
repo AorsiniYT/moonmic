@@ -22,6 +22,19 @@ namespace moonmic {
 namespace platform {
 namespace windows {
 
+std::string WideToUtf8(const wchar_t* value) {
+    if (!value) return {};
+
+    const int size = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 1) return {};
+
+    std::string result(static_cast<size_t>(size), '\0');
+    if (WideCharToMultiByte(CP_UTF8, 0, value, -1, result.data(), size, nullptr, nullptr) == 0) return {};
+
+    result.resize(static_cast<size_t>(size - 1));
+    return result;
+}
+
 bool GetDefaultRecordingDevice(std::string& deviceId, std::string& friendlyName) {
     AudioDeviceManager manager;
     AudioDeviceInfo info = manager.getCurrentDefaultRecordingDevice();

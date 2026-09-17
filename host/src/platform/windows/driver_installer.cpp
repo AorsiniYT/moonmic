@@ -1,6 +1,7 @@
 #include "logger.h"
 
 #include "driver_installer.h"
+#include "audio_utils.h"
 #define INITGUID
 #include <windows.h>
 #include <mmreg.h>
@@ -141,8 +142,7 @@ std::string DriverInstaller::getVBCableInputDevice() {
                 props->GetValue(PKEY_Device_FriendlyName, &var_name);
 
                 if (var_name.vt == VT_LPWSTR) {
-                    std::wstring wname(var_name.pwszVal);
-                    std::string name(wname.begin(), wname.end());
+                    const std::string name = platform::windows::WideToUtf8(var_name.pwszVal);
 
                     if (name.find("CABLE Input") != std::string::npos) {
                         result = name;
@@ -208,8 +208,7 @@ std::string DriverInstaller::getVBCableOutputDevice() {
                 props->GetValue(PKEY_Device_FriendlyName, &var_name);
 
                 if (var_name.vt == VT_LPWSTR) {
-                    std::wstring wname(var_name.pwszVal);
-                    std::string name(wname.begin(), wname.end());
+                    const std::string name = platform::windows::WideToUtf8(var_name.pwszVal);
 
                     if (name.find("CABLE Output") != std::string::npos) {
                         result = name;

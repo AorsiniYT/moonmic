@@ -401,9 +401,10 @@ if(MOONMIC_HOST_BUILD_TESTS)
 
     add_executable(moonmic-udp-lifecycle-test
         tests/udp_lifecycle_test.cpp
+        src/network/connection_monitor.cpp
         src/network/udp_receiver.cpp
     )
-    target_include_directories(moonmic-udp-lifecycle-test PRIVATE src)
+    target_include_directories(moonmic-udp-lifecycle-test PRIVATE src ../include)
     target_link_libraries(moonmic-udp-lifecycle-test PRIVATE Threads::Threads)
     if(WIN32)
         target_link_libraries(moonmic-udp-lifecycle-test PRIVATE ws2_32)

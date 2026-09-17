@@ -9,6 +9,10 @@
 #include <ks.h>
 #include <ksmedia.h>
 
+namespace {
+constexpr GUID kKsDataFormatSubtypeIeeeFloat = {STATIC_KSDATAFORMAT_SUBTYPE_IEEE_FLOAT};
+}
+
 namespace moonmic {
 
 AudioDeviceManager::AudioDeviceManager() {
@@ -270,7 +274,7 @@ bool AudioDeviceManager::getNativeFormat(const std::string& device_name, bool is
 
                         if (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE) {
                             WAVEFORMATEXTENSIBLE* pwfxe = reinterpret_cast<WAVEFORMATEXTENSIBLE*>(pwfx);
-                            if (pwfxe->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT) {
+                            if (pwfxe->SubFormat == kKsDataFormatSubtypeIeeeFloat) {
                                 out_format.is_float = true;
                             }
                         } else if (pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT) {

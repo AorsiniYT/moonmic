@@ -5,6 +5,8 @@
 #include <vector>
 #include <cstdint>
 
+#include "sunshine_request.h"
+
 namespace moonmic {
 
 struct Config;
@@ -52,6 +54,8 @@ class SunshineWebUI {
     std::string session_password_;
 
     std::string generateAuthHeader() const;
+    SunshineRequestResult makeAuthenticatedRequestResult(const std::string& endpoint, const std::string& method,
+                                                         const std::string& body);
 
     void saveCredentials();
 };

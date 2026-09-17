@@ -24,6 +24,7 @@ class UDPReceiver {
     void setPacketCallback(PacketCallback callback) { packet_callback_ = callback; }
 
     bool sendTo(const void* data, size_t size, const std::string& ip, uint16_t port);
+    uint16_t boundPort() const;
 
   private:
 #ifdef _WIN32
